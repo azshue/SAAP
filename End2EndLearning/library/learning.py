@@ -14,7 +14,7 @@ from sklearn.utils import shuffle
 from sklearn.model_selection import train_test_split
 
 from utilities import resize_image, random_distort, load_train_data, load_train_data_multi, load_train_data_multi_pack
-from networks import net_lstm, create_nvidia_network, GAN_Nvidia, mean_accuracy
+from networks import net_lstm, create_nvidia_network, GAN_Nvidia, mean_accuracy, mean_accuracy_tf
 import time
 import ntpath
 
@@ -279,7 +279,8 @@ def normalize_value(value_list):
 
 def train_dnn_multi(imageDir_list, labelPath_list, outputPath, netType, flags, specs, modelPath = "", 
 	trainRatio = 1.0, partialPreModel = False, reinitHeader = False, 
-	BN_flag=0, imageDir_list_advp=[], labelPath_list_advp=[], trainRatio_advp = 1.0, reinitBN = False, pack_flag=False):
+	BN_flag=0, imageDir_list_advp=[], labelPath_list_advp=[], trainRatio_advp = 1.0, reinitBN = False, pack_flag=False,
+	adv_step=0.2, n_repeats=3, eps=0.5, before_relu=False):
 	
 	## assigning variables
 	fRandomDistort = flags[0]
@@ -327,8 +328,13 @@ def train_dnn_multi(imageDir_list, labelPath_list, outputPath, netType, flags, s
 		nChannel = 3
 		if pack_flag:
 			nChannel = 3*len(imageDir_list)
-		net = create_nvidia_network(BN_flag, fClassifier, nClass, nChannel)
-		if BN_flag <= 1:
+		if BN_flag == 3:
+			net = create_nvidia_network(BN_flag, fClassifier, nClass, nChannel, 
+						adv_step=adv_step, n_repeats=n_repeats, eps=eps, before_relu=before_relu)
+			print("AdvBN model created")
+		else:
+			net = create_nvidia_network(BN_flag, fClassifier, nClass, nChannel)
+		if BN_flag <= 1 or BN_flag == 3:
 			if not pack_flag:
 				trainGenerator = gen_train_data_random(xTrainList, yTrainList, batchSize)
 				validGenerator = gen_train_data_random(xValidList, yValidList, batchSize)
@@ -356,8 +362,10 @@ def train_dnn_multi(imageDir_list, labelPath_list, outputPath, netType, flags, s
 
 	if modelPath != "":
 		print("pretrain modelPath: ", modelPath)
-		net.load_weights(modelPath)
-		print(partialPreModel)
+		if BN_flag == 3:
+			net(tf.ones((1, 66, 200, 3)))
+		net.load_weights(modelPath, by_name=True)
+		# print(partialPreModel)
 		if partialPreModel:
 			print("partial PreModel activate")
 			#net_untrain = net_nvidia(fClassifier, nClass)
@@ -380,6 +388,13 @@ def train_dnn_multi(imageDir_list, labelPath_list, outputPath, netType, flags, s
 				net.layers[id].set_weights(net_untrain.layers[id].get_weights())
 			net.compile(optimizer=keras.optimizers.Adam(lr=1e-4), loss='mse', metrics=[mean_accuracy])
 			#net.compile(optimizer=keras.optimizers.Adam(lr=1e-4), loss='mse', metrics=['accuracy'])
+		if BN_flag == 3:
+			print('load weight for AdvBN fine-tuning')
+			net.compile(h_optimizer=tf.keras.optimizers.Adam(lr=1e-5), loss_fn=tf.keras.losses.MeanSquaredError(), h_metrics=mean_accuracy_tf)
+			print(net.summary())
+			print('trainable weight:')
+			for var in net.trainable_weights:
+				print(var.name)
 
 
 	## setup outputs
@@ -397,8 +412,14 @@ def train_dnn_multi(imageDir_list, labelPath_list, outputPath, netType, flags, s
 	if netType != 5:
 		nTrainStep = int(len(yTrainList)/batchSize) + 1
 		nValidStep = int(len(yValidList)/batchSize) + 1
-		net.fit_generator(trainGenerator, steps_per_epoch=nTrainStep, epochs=nEpoch, \
-		verbose=2, callbacks=[modelLog,lossLog], validation_data=validGenerator, validation_steps=nValidStep)
+		if BN_flag == 3:
+			modelLog_tf = tf.keras.callbacks.ModelCheckpoint(outputPath + 'model{epoch:02d}.h5', monitor='val_loss', save_best_only=True)
+			lossLog_tf  = tf.keras.callbacks.CSVLogger(outputPath + 'loss-log', append=True, separator=',')
+			net.fit(x=trainGenerator, steps_per_epoch=nTrainStep, epochs=nEpoch, \
+			verbose=2, callbacks=[modelLog_tf,lossLog_tf], validation_data=validGenerator, validation_steps=nValidStep)
+		else:
+			net.fit_generator(trainGenerator, steps_per_epoch=nTrainStep, epochs=nEpoch, \
+			verbose=2, callbacks=[modelLog,lossLog], validation_data=validGenerator, validation_steps=nValidStep)
 	else:
 		for [x_batch, y_batch] in trainGenerator:
 			print(x_batch.shape)
@@ -524,9 +545,10 @@ def train_dnn_overfitting(trainSpec, xTrainList, yTrainList, xValidList, yValidL
 '''
 
 	
-def test_dnn_multi(modelPath, imageDir_list, labelPath_list, outputPath, netType, flags, specs, BN_flag=0, pathID=0, ratio=1, pack_flag=False):
+def test_dnn_multi(modelPath, imageDir_list, labelPath_list, outputPath, netType, flags, specs, BN_flag=0, pathID=0, ratio=1, pack_flag=False,
+	adv_step=0.2, n_repeats=3, eps=0.5, before_relu=False):
 	
-    ## assigning variables
+	## assigning variables
 # 	fRandomDistort = flags[0]
 	fThreeCameras  = flags[1]
 	fClassifier    = flags[2]
@@ -535,7 +557,7 @@ def test_dnn_multi(modelPath, imageDir_list, labelPath_list, outputPath, netType
 	nClass         = specs[2]
 	nFramesSample  = specs[3]
 	nRep  = specs[4]
-    
+	
 	print('\n\n\n')
 	print('********************************************')
 	
@@ -561,7 +583,7 @@ def test_dnn_multi(modelPath, imageDir_list, labelPath_list, outputPath, netType
 		print('\n######### Classification #########')
 		testLabels = normalize_value(testLabels)
 		testLabels = to_categorical(testLabels, num_classes = nClass)
-    
+	
 	print(testFeatures)
 	print('The number of tested data: ' + str(testLabels.shape))
 	print('********************************************')
@@ -596,10 +618,14 @@ def test_dnn_multi(modelPath, imageDir_list, labelPath_list, outputPath, netType
 		nChannel = 3*len(imageDir_list)
 
 
-    ## choose networks, 1: CNN, 2: LSTM-m2o, 3: LSTM-m2m, 4: LSTM-o2o
+	## choose networks, 1: CNN, 2: LSTM-m2o, 3: LSTM-m2m, 4: LSTM-o2o
 	if netType == 1:
 # 		outputPath = trainPath + 'trainedModels/models-cnn/';
-		net = create_nvidia_network(BN_flag, fClassifier, nClass, nChannel)
+		if BN_flag == 3:
+			net = create_nvidia_network(BN_flag, fClassifier, nClass, nChannel, 
+						adv_step=adv_step, n_repeats=n_repeats, eps=eps, before_relu=before_relu)
+		else:
+			net = create_nvidia_network(BN_flag, fClassifier, nClass, nChannel)
 	elif netType == 2:
 # 		outputPath = trainPath + 'trainedModels/models-lstm-m2o/'
 		net = net_lstm(2, nFramesSample)
@@ -610,7 +636,7 @@ def test_dnn_multi(modelPath, imageDir_list, labelPath_list, outputPath, netType
 	#print(net.layers[3].get_weights())
 	print(net.summary())
 	
-    ## load model weights
+	## load model weights
 	if modelPath != "":
 		net.load_weights(modelPath)
 
@@ -638,6 +664,8 @@ def test_dnn_multi(modelPath, imageDir_list, labelPath_list, outputPath, netType
 				outputs.append(layer.get_output_at(0))
 				outputs.append(layer.get_output_at(1))
 		last_conv_id = 22
+	# elif BN_flag == 3:
+
 
 
 	functor = K.function([inp], outputs )   # evaluation function
@@ -692,13 +720,13 @@ def test_dnn_multi(modelPath, imageDir_list, labelPath_list, outputPath, netType
 		if outputPath != "":
 			f.write("accuracy: {:.5f}\n\n".format(correct_count / (float)(n)))
 			f.write("{:^12} {:^12} {:^12} {:^12}\n".format("prediction", "groundtruth", "difference", "input"))
-	    
+		
 		for p in range(len(predictResults)):
 	# 		if fClassifier:
 	#  			f.write(str(np.argmax(p)))
 	#  			print(np.argmax(p))
 	# 		else: 
-	        # for regression
+			# for regression
 			imgName = os.path.basename(testFeatures[p])
 			prediction = predictResults[p]
 			groundTruth = testLabels[p]
@@ -770,15 +798,15 @@ def test_dnn_multi(modelPath, imageDir_list, labelPath_list, outputPath, netType
 		if outputPath != "":
 			f.write("mean accuracy: {:.5f}\n\n".format(np.mean(acc_list)))
 
-	    
+		
 			f.write("{:^12} {:^12} {:^12} {:^12}\n".format("prediction", "groundtruth", "difference", "input"))
-		    
+			
 			for p in range(len(predictResults)):
 		# 		if fClassifier:
 		#  			f.write(str(np.argmax(p)))
 		#  			print(np.argmax(p))
 		# 		else: 
-		        # for regression
+				# for regression
 				imgName = os.path.basename(testFeatures[p])
 				prediction = predictResults[p][0]
 				groundTruth = testLabels[p]
@@ -803,7 +831,7 @@ def test_dnn_multi(modelPath, imageDir_list, labelPath_list, outputPath, netType
 
 def test_dnn_visualize(modelPath, imageDir, labelPath, outputPath, netType, flags, specs, BN_flag=0, pathID=0, radius=5):
 	
-    ## assigning variables
+	## assigning variables
 # 	fRandomDistort = flags[0]
 	fThreeCameras  = flags[1]
 	fClassifier    = flags[2]
@@ -814,7 +842,7 @@ def test_dnn_visualize(modelPath, imageDir, labelPath, outputPath, netType, flag
 	nRep  = specs[4]
 	
 	step = 2
-    
+	
 	print('\n\n\n')
 	print('********************************************')
 	
@@ -833,12 +861,12 @@ def test_dnn_visualize(modelPath, imageDir, labelPath, outputPath, netType, flag
 		print('\n######### Classification #########')
 		testLabels = normalize_value(testLabels)
 		testLabels = to_categorical(testLabels, num_classes = nClass)
-    
+	
 	print(testFeatures)
 	print('The number of tested data: ' + str(testLabels.shape))
 	print('********************************************')
 
-    ## choose networks, 1: CNN, 2: LSTM-m2o, 3: LSTM-m2m, 4: LSTM-o2o
+	## choose networks, 1: CNN, 2: LSTM-m2o, 3: LSTM-m2m, 4: LSTM-o2o
 	if netType == 1:
 # 		outputPath = trainPath + 'trainedModels/models-cnn/';
 		net = create_nvidia_network(BN_flag, fClassifier, nClass)
@@ -852,7 +880,7 @@ def test_dnn_visualize(modelPath, imageDir, labelPath, outputPath, netType, flag
 	#print(net.layers[3].get_weights())
 	print(net.summary())
 	
-    ## load model weights
+	## load model weights
 	if modelPath != "":
 		net.load_weights(modelPath)
 
@@ -944,7 +972,7 @@ def test_dnn_visualize(modelPath, imageDir, labelPath, outputPath, netType, flag
 
 		cv2.imwrite(outputImagePath, img_ori)
 		#cv2.waitKey(1);
-	    
+		
 			
 	print('********************************************')
 	print('\n\n\n')
@@ -953,7 +981,7 @@ def test_dnn_visualize(modelPath, imageDir, labelPath, outputPath, netType, flag
 
 def visualize_dnn_on_image(modelPath, imagePath, label, outputPath, netType, flags, specs, radius=10, BN_flag=0, pathID=0):
 	
-    ## assigning variables
+	## assigning variables
 # 	fRandomDistort = flags[0]
 	fThreeCameras  = flags[1]
 	fClassifier    = flags[2]
@@ -962,7 +990,7 @@ def visualize_dnn_on_image(modelPath, imagePath, label, outputPath, netType, fla
 	nClass         = specs[2]
 	nFramesSample  = specs[3]
 	nRep  = specs[4]
-    
+	
 	print('\n\n\n')
 	print('********************************************')
 	
@@ -995,7 +1023,7 @@ def visualize_dnn_on_image(modelPath, imagePath, label, outputPath, netType, fla
 
 	testData = np.array(testData)
 
-    ## choose networks, 1: CNN, 2: LSTM-m2o, 3: LSTM-m2m, 4: LSTM-o2o
+	## choose networks, 1: CNN, 2: LSTM-m2o, 3: LSTM-m2m, 4: LSTM-o2o
 	if netType == 1:
 # 		outputPath = trainPath + 'trainedModels/models-cnn/';
 		net = create_nvidia_network(BN_flag, fClassifier, nClass)
@@ -1009,7 +1037,7 @@ def visualize_dnn_on_image(modelPath, imagePath, label, outputPath, netType, fla
 	#print(net.layers[3].get_weights())
 	print(net.summary())
 	
-    ## load model weights
+	## load model weights
 	if modelPath != "":
 		net.load_weights(modelPath)
 
@@ -1107,12 +1135,12 @@ def visualize_dnn_on_image(modelPath, imagePath, label, outputPath, netType, fla
 
 
 def read_float_list(file_name):
-    x = []
-    file_in = open(file_name, 'r')
-    for y in file_in.read().split('\n'):
-        if len(y) > 0:
-            x.append(float(y))
-    return x
+	x = []
+	file_in = open(file_name, 'r')
+	for y in file_in.read().split('\n'):
+		if len(y) > 0:
+			x.append(float(y))
+	return x
 
 def is_similar(val1, val2, val_thresh, percent_thresh):
 	val_diff = abs(val1 - val2)
@@ -1128,7 +1156,7 @@ def is_similar(val1, val2, val_thresh, percent_thresh):
 def filter_dataset(modelPath, imageDir, labelPath, outputPath, netType, flags, specs, BN_flag=0, target_BN_folder="", filter_percent=0.1):
 	
 
-    ## assigning variables
+	## assigning variables
 # 	fRandomDistort = flags[0]
 	fThreeCameras  = flags[1]
 	fClassifier    = flags[2]
@@ -1137,7 +1165,7 @@ def filter_dataset(modelPath, imageDir, labelPath, outputPath, netType, flags, s
 	nClass         = specs[2]
 	nFramesSample  = specs[3]
 	nRep  = specs[4]
-    
+	
 	print('\n\n\n')
 	print('********************************************')
 	
@@ -1151,7 +1179,7 @@ def filter_dataset(modelPath, imageDir, labelPath, outputPath, netType, flags, s
 	testFeatures = np.array(testFeatures)
 	testLabels = np.array(testLabels)
 
-    ## choose networks, 1: CNN, 2: LSTM-m2o, 3: LSTM-m2m, 4: LSTM-o2o
+	## choose networks, 1: CNN, 2: LSTM-m2o, 3: LSTM-m2m, 4: LSTM-o2o
 	if netType == 1:
 # 		outputPath = trainPath + 'trainedModels/models-cnn/';
 		net = create_nvidia_network(BN_flag, fClassifier, nClass)
@@ -1165,7 +1193,7 @@ def filter_dataset(modelPath, imageDir, labelPath, outputPath, netType, flags, s
 	#print(net.layers[3].get_weights())
 	print(net.summary())
 	
-    ## load model weights
+	## load model weights
 	if modelPath != "":
 		net.load_weights(modelPath)
 

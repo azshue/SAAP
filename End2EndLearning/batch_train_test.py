@@ -16,7 +16,8 @@ from test import test_network, test_network_multi, visualize_network_on_image
 from library.fid_score import *
 
 DATASET_ROOT = ROOT_DIR + "/Data/udacityA_nvidiaB/"
-OUTPUT_ROOT = ROOT_DIR + "/Data/udacityA_nvidiaB_results/"
+# OUTPUT_ROOT = ROOT_DIR + "/Data/udacityA_nvidiaB_results/"
+OUTPUT_ROOT = ROOT_DIR + "/Data/udacityA_nvidiaB_advbn_results/"
 TRAIN_OUTPUT_ROOT = OUTPUT_ROOT + "train_results/"
 TEST_OUTPUT_ROOT = OUTPUT_ROOT + "test_results/"
 
@@ -64,7 +65,7 @@ def single_test():
 	labelPath = DATASET_ROOT + labelName
 
 	outputPath = TRAIN_OUTPUT_ROOT + train_folder + "/"
-	#train_network(imagePath, labelPath, outputPath)
+	train_network(imagePath, labelPath, outputPath)
 
 	modelPath = outputPath + "/model-final.h5"
 
@@ -76,6 +77,27 @@ def single_test():
 	outputPath = TEST_OUTPUT_ROOT + "(" + train_folder + ")_(" + val_folder + ")/test_result.txt"
 	#modelPath = ""
 	test_network(modelPath, imagePath, labelPath, outputPath)
+
+def single_test_advbn(adv_step, n_repeats, eps, before_relu):
+	train_folder = "trainB"
+	val_folder = "valB"
+
+	imagePath = DATASET_ROOT + train_folder + "/"
+	labelName = get_label_file_name(train_folder)
+	labelPath = DATASET_ROOT + labelName
+
+	outputPath = TRAIN_OUTPUT_ROOT + train_folder + "/"
+	modelPath = ROOT_DIR + "/Data/udacityA_nvidiaB_advbn_results/train_results/trainB/model-init.h5"
+	train_network(imagePath, labelPath, outputPath, modelPath=modelPath, BN_flag=3, adv_step=adv_step, n_repeats=n_repeats, eps=eps, before_relu=before_relu)
+
+	# modelPath_new = outputPath + "/model-advbn.h5"
+
+	# imagePath = DATASET_ROOT + val_folder + "/"
+	# labelName = get_label_file_name(val_folder, "")
+	# labelPath = DATASET_ROOT + labelName
+
+	# outputPath = TEST_OUTPUT_ROOT + "(" + train_folder + ")_(" + val_folder + ")/test_result.txt"
+	# test_network(modelPath_new, imagePath, labelPath, outputPath)
 
 def single_test_with_config(subtask_id=-1):
 	train_folder = "trainB"
@@ -764,6 +786,10 @@ if __name__ == "__main__":
 	parser.add_argument('--gpu_id', required=False, metavar="gpu_id", help='gpu id (0/1)')
 	parser.add_argument('--task_id', required=False, metavar="task_id", help='task_id id (0/1)')
 	parser.add_argument('--subtask_id', required=False, metavar="subtask_id", help='subtask_id id (0/1)')
+	parser.add_argument('--adv_step', default=0.2, type=float, help='fgsm step size')
+	parser.add_argument('--eps', default=0.5, type=float, help='adversarial step: projection radias')
+	parser.add_argument('--n_repeats', default=3, type=int, help='adversarial repeat')
+	parser.add_argument('--before_relu', action='store_true', default=False, help='perturb feature before activation layer')
 	args = parser.parse_args()
 
 	if (args.gpu_id != None):
@@ -792,7 +818,7 @@ if __name__ == "__main__":
 		else:
 			print("Unknown task: " + args.task_id)
 	else:
-		single_test()
+		single_test_advbn(args.adv_step, args.n_repeats, args.eps, args.before_relu)
 		#single_test_with_config()
 		#single_test_AdvProp()
 		#multi_factor_search_test()

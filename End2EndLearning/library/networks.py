@@ -42,13 +42,19 @@ def net_lstm(netType, nFramesSample):
 	return net
 
 
-def create_nvidia_network(BN_flag, fClassifier, nClass, nChannel=3):
+def create_nvidia_network(BN_flag, fClassifier, nClass, nChannel=3, **kwargs):
 	if BN_flag == 0:
 		net = net_nvidia_1(fClassifier, nClass, nChannel)
 	elif BN_flag == 1:
 		net = net_nvidia_BN(fClassifier, nClass)
 	elif BN_flag == 2:
 		net = net_nvidia_AdvProp(fClassifier, nClass)
+	elif BN_flag == 3:
+		adv_step = kwargs['adv_step']
+		n_repeats = kwargs['n_repeats']
+		eps = kwargs['eps']
+		before_relu = kwargs['before_relu']
+		net = AdvBN_Net(fClassifier, nClass, adv_step, n_repeats, eps, before_relu)
 	return net
 
 		
@@ -87,7 +93,20 @@ def mean_accuracy(y_true, y_pred):
 
 	res_list = []
 	for thresh_hold in thresh_holds:
-		res_list.append(tf.math.reduce_mean(tf.to_float(keras.backend.abs(y_true-y_pred) > thresh_hold)))
+		res_list.append(tf.math.reduce_mean(tf.to_float(tf.keras.backend.abs(y_true-y_pred) > thresh_hold)))
+
+	MA = tf.math.reduce_mean(res_list)
+	
+	return MA
+
+## For tensorflow >= 2.0
+def mean_accuracy_tf(y_true, y_pred):
+	
+	thresh_holds = [0.1, 0.2, 0.5, 1, 2, 5]
+
+	res_list = []
+	for thresh_hold in thresh_holds:
+		res_list.append(tf.math.reduce_mean(tf.cast(tf.keras.backend.abs(y_true-y_pred) > thresh_hold, dtype=tf.float32)))
 
 	MA = tf.math.reduce_mean(res_list)
 	
@@ -329,28 +348,28 @@ class GAN_Nvidia():
 		self.channels = 3
 		self.img_shape = (self.img_rows, self.img_cols, self.channels)
 
-        #optimizer = Adam(0.0002, 0.5)
+		#optimizer = Adam(0.0002, 0.5)
 		optimizer = Adam(lr=1e-4)
 
-        # Build and compile the discriminator
+		# Build and compile the discriminator
 		self.d = self.build_discriminators()
 		self.d.compile(optimizer=optimizer, loss='mse', metrics=['accuracy'])
 
-        # Build the generator
+		# Build the generator
 		self.g = self.build_generators()
 
-        # The generator takes noise as input and generated imgs
+		# The generator takes noise as input and generated imgs
 		z = Input(shape=self.img_shape)
 		img_gene = self.g(z)
 
-        # For the combined model we will only train the generators
+		# For the combined model we will only train the generators
 		self.d.trainable = False
 
-        # The valid takes generated images as input and determines validity
+		# The valid takes generated images as input and determines validity
 		valid = self.d(img_gene)
 
-        # The combined model  (stacked generators and discriminators)
-        # Trains generators to fool discriminators
+		# The combined model  (stacked generators and discriminators)
+		# Trains generators to fool discriminators
 		self.combined = Model(z, valid)
 		self.combined.compile(optimizer=optimizer, loss=self.generator_loss, metrics=['accuracy'])
 
@@ -406,9 +425,267 @@ class GAN_Nvidia():
 		return model
 
 
+class FeatureX(tf.keras.layers.Layer):
+	def __init__(self, before_relu, nChannel=3):
+		super(FeatureX, self).__init__()
+		self.input_layer = tf.keras.Input(shape=(66, 200, nChannel))
+		self.conv1 = tf.keras.layers.Conv2D(24, (5, 5), strides=(2,2), padding='valid', kernel_regularizer=l2(0.001))
+		self.conv2 = tf.keras.layers.Conv2D(36, (5, 5), strides=(2,2), padding='valid', kernel_regularizer=l2(0.001))
+		self.before_relu = before_relu
+
+	def call(self, input):
+		input = tf.cast(input, tf.float32)
+		x = tf.keras.layers.Lambda(lambda x: x/127.5 - 1.0)(input)
+		x = self.conv1(x)
+		x = tf.nn.elu(x)
+		x = self.conv2(x)
+		if self.before_relu:
+			return x
+		x = tf.nn.elu(x)
+		return x
+
+class Head(tf.keras.layers.Layer):
+	def __init__(self, fClassifier, nClass):
+		super(Head, self).__init__()
+		self.conv3 = tf.keras.layers.Conv2D(48, (5, 5), strides=(2,2), padding='valid', kernel_regularizer=l2(0.001))
+		self.conv4 = tf.keras.layers.Conv2D(64, (3, 3), padding='valid', kernel_regularizer=l2(0.001))
+		self.conv5 = tf.keras.layers.Conv2D(64, (3, 3), padding='valid', kernel_regularizer=l2(0.001))
+		self.flat = tf.keras.layers.Flatten()
+		self.dense1 = tf.keras.layers.Dense(100, kernel_regularizer=l2(0.001))
+		self.dense2 = tf.keras.layers.Dense(50,  kernel_regularizer=l2(0.001))
+		self.dense3 = tf.keras.layers.Dense(10,  kernel_regularizer=l2(0.001))
+		self.dense_cls = tf.keras.layers.Dense(nClass, activation='softmax')
+		self.dense = tf.keras.layers.Dense(1)
+		self.fClassifier = fClassifier
+
+	def call(self, input):
+		input = tf.nn.elu(input)
+		x = self.conv3(input)
+		x = tf.nn.elu(x)
+		x = self.conv4(x)
+		x = tf.nn.elu(x)
+		x = self.conv5(x)
+		x = tf.nn.elu(x)
+		x = self.flat(x)
+		x = self.dense1(x)
+		x = tf.nn.elu(x)
+		x = self.dense2(x)
+		x = tf.nn.elu(x)
+		x = self.dense3(x)
+		x = tf.nn.elu(x)
+		if self.fClassifier:
+			x = self.dense_cls(x)
+		else:
+			x = self.dense_cls(x)
+
+
+class AdvBN_Net(tf.keras.Model):
+	def __init__(self, fClassifier, nClass, adv_step, n_repeats, eps, before_relu, nChannel=3):
+		super(AdvBN_Net, self).__init__()
+		self.img_rows = 66
+		self.img_cols = 200
+		self.nChannel = nChannel
+		self.img_shape = (self.img_rows, self.img_cols, self.nChannel)
+		self.feature_shape = (14, 47, 36)
+
+		self.fClassifier = fClassifier
+		self.nClass = nClass
+		self.adv_step = adv_step
+		tf.print(n_repeats)
+		self.n_repeats = int(n_repeats)
+		self.eps = eps
+		self.before_relu = before_relu
+		self.noise_batch_mean = None
+		self.noise_batch_std = None
+
+		if fClassifier:
+			self.output_dim = nClass
+		else:
+			self.output_dim = 1
+
+		# self.featureX = FeatureX(before_relu)
+		self.featureX = self.get_featureX()
+		self.featureX.trainable = False
+		# self.head = Head(fClassifier, nClass)
+		self.head = self.get_head()
+
+	def get_featureX(self):
+		mainInput = tf.keras.Input(shape=self.img_shape)
+		x = tf.keras.layers.Lambda(lambda x: x/127.5 - 1.0)(mainInput)
+		x = tf.keras.layers.Conv2D(24, (5, 5), strides=(2,2), padding='valid', kernel_regularizer=l2(0.001))(x)
+		x = tf.nn.elu(x)
+		x = tf.keras.layers.Conv2D(36, (5, 5), strides=(2,2), padding='valid', kernel_regularizer=l2(0.001))(x)
+		if self.before_relu:
+			mainOutput = x
+		else:
+			mainOutput = tf.nn.elu(x)
+		model = tf.keras.Model(inputs=mainInput, outputs=mainOutput)
+		print("**********************  FeatureX *****************************")
+		model.summary()
+
+		return model
+
+	def get_head(self):
+		mainInput = tf.keras.Input(shape=self.feature_shape)
+		x = tf.nn.elu(mainInput)
+		x = tf.keras.layers.Conv2D(48, (5, 5), strides=(2,2), padding='valid', kernel_regularizer=l2(0.001))(x)
+		x = tf.nn.elu(x)
+		x = tf.keras.layers.Conv2D(64, (3, 3), padding='valid', kernel_regularizer=l2(0.001))(x)
+		x = tf.nn.elu(x)
+		x = tf.keras.layers.Conv2D(64, (3, 3), padding='valid', kernel_regularizer=l2(0.001))(x)
+		x = tf.nn.elu(x)
+		x = tf.keras.layers.Flatten()(x)
+		x = tf.keras.layers.Dense(100, kernel_regularizer=l2(0.001))(x)
+		x = tf.nn.elu(x)
+		x = tf.keras.layers.Dense(50,  kernel_regularizer=l2(0.001))(x)
+		x = tf.nn.elu(x)
+		x = tf.keras.layers.Dense(10,  kernel_regularizer=l2(0.001))(x)
+		x = tf.nn.elu(x)
+		if self.fClassifier:
+			mainOutput = tf.keras.layers.Dense(self.nClass, activation='softmax')(x)
+		else:
+			mainOutput = tf.keras.layers.Dense(1)(x)
+		model = tf.keras.Model(inputs=mainInput, outputs=mainOutput)
+		print("**********************  Head *****************************")
+		model.summary()
+
+		return model
+
+
+	# def build(self, input_shape):
+	# 	super(AdvBN_Net, self).build(input_shape)
+	
+	def compile(self, h_optimizer, loss_fn, h_metrics):
+		super(AdvBN_Net, self).compile()
+		self.h_optimizer = h_optimizer
+		self.loss_fn = loss_fn
+		self.h_metrics = h_metrics
+		self.train_loss_tracker = tf.keras.metrics.Mean(name="loss")
+		self.train_ma_tracker = tf.keras.metrics.Mean(name="ma_mean")
+	
+	def call(self, input):
+		x = self.featureX(input)
+		x = self.head(x)
+		return x
+
+	def calc_mean_std(self, feature, delta=1e-5):
+		size = feature.get_shape().as_list()
+		assert (len(size) == 4)
+		C = size[3]
+		feature = tf.transpose(feature, perm=[3, 0, 1, 2])
+		feature = tf.reshape(feature, [C, -1])
+		feat_mean = tf.keras.backend.mean(feature, axis=1)
+		feat_mean = tf.reshape(feat_mean, [1, 1, 1, C])
+		# feat_mean = feat.permute(1, 0, 2, 3).reshape(C, -1).mean(dim=1).view(1, C, 1, 1)
+		# feat_var = feat.permute(1, 0, 2, 3).reshape(C, -1).var(dim=1) + delta
+		feat_std = tf.keras.backend.std(feature, axis=1) + delta
+		feat_std = tf.reshape(feat_std, [1, 1, 1, C])
+		# feat_std = feat_var.sqrt().view(1, C, 1, 1)
+		return feat_mean, feat_std
+
+	def perturb(self, feature, target):
+		# tf.print('perturb')
+		size = feature.get_shape().as_list()
+		noise_size = [1, 1, 1, size[3]]
+		if self.noise_batch_mean is None:
+			self.noise_batch_mean = tf.Variable(tf.ones(noise_size))
+			self.noise_batch_std = tf.Variable(tf.ones(noise_size))
+		else:
+			self.noise_batch_mean.assign(tf.ones(noise_size))
+			self.noise_batch_std.assign(tf.ones(noise_size))
+		# noise_batch_mean = tf.ones(noise_size)
+		# noise_batch_std = tf.ones(noise_size)
+
+		ori_mean, ori_std = self.calc_mean_std(feature)
+		normalized_feature = feature - ori_mean
+		# tf.print(self.n_repeats)
+		for _iter in range(self.n_repeats):
+			with tf.GradientTape() as tape:
+				new_mean = ori_mean * self.noise_batch_mean
+				new_std = self.noise_batch_std
+				adv_feature = normalized_feature * new_std + new_mean
+
+				input_feature = adv_feature
+
+				output = self.head(input_feature)
+				loss = self.loss_fn(output, target)
+
+			grads_mean, grads_std = tape.gradient(loss, [self.noise_batch_mean, self.noise_batch_std])
+
+			print(grads_mean)
+			self.noise_batch_mean.assign_add(self.adv_step * tf.keras.backend.sign(grads_mean))
+			self.noise_batch_std.assign_add(self.adv_step * tf.keras.backend.sign(grads_std))
+			self.noise_batch_mean.assign(tf.keras.backend.clip(self.noise_batch_mean, min_value=1-self.eps, max_value=1+self.eps))
+			self.noise_batch_std.assign(tf.keras.backend.clip(self.noise_batch_std, min_value=1-self.eps, max_value=1+self.eps))
+			# tf.print("nois_batch_mean", self.noise_batch_mean)
+
+		new_mean = ori_mean * self.noise_batch_mean
+		new_std = self.noise_batch_std
+		adv_feature = normalized_feature * new_std + new_mean
+		out_feature = adv_feature
+
+		# tf.debugging.assert_none_equal(out_feature, feature)
+		
+		return out_feature
+
+	def train_step(self, batch_data):
+		input, target = batch_data
+		# tf.print(target.get_shape())
+
+		feature = self.featureX(input)
+
+		clean_feature = feature
+		input_feature = tf.identity(feature)
+		adv_feature = self.perturb(input_feature, target)
+
+		with tf.GradientTape() as tape:
+			adv_output = self.head(adv_feature)
+			clean_output = self.head(clean_feature)
+
+			adv_loss = self.loss_fn(adv_output, target)
+			clean_loss = self.loss_fn(clean_output, target)
+			loss = adv_loss + clean_loss
+
+		grads = tape.gradient(loss, self.head.trainable_weights)
+		self.h_optimizer.apply_gradients(zip(grads, self.head.trainable_weights))
+		ma = self.h_metrics(clean_output, target)
+
+		self.train_ma_tracker.update_state(ma)
+		self.train_loss_tracker.update_state(loss)
+
+		return{
+			"adv_loss": adv_loss,
+			"clean_loss": clean_loss,
+			"total_loss": loss,
+			"loss_tracker": self.train_loss_tracker.result(),
+			"mean_accuracy": ma,
+			"ma_tracker": self.train_ma_tracker.result()
+		}
+	
+	def test_step(self, batch_data):
+		input, target = batch_data
+
+		feature = self.featureX(input)
+		output = self.head(feature)
+
+		loss = self.loss_fn(output, target)
+		ma = self.h_metrics(output, target)
+
+		return{
+			"loss": loss,
+			"mean_accuracy": ma
+			# m.name: m.result() for m in self.metric,
+		}
+
 
 	
 if __name__ == "__main__":
 	print('\n')
 	print("### This is the file specifying different network architectures. Please do not run it directly.")
 	print('\n')
+	# import h5py
+	# kv = h5py.File("./Data/udacityA_nvidiaB_results/train_results/trainB/model-final.h5", "r")
+
+	# model = create_nvidia_network(BN_flag=3, fClassifier=False, nClass=49, nChannel=3, 
+	# 					adv_step=0.2, n_repeats=6, eps=1.1, before_relu=False)
+	

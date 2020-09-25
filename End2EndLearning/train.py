@@ -16,12 +16,15 @@ from learning import train_dnn_multi
 
 
 def train_network(imagePath, labelPath, outputPath, modelPath = "", trainRatio = 1.0, partialPreModel = False, reinitHeader = False, 
-	BN_flag=0, imagePath_advp=[], labelPath_advp=[], trainRatio_advp = 1.0, reinitBN = False, classification = False, netType=1):
+	BN_flag=0, imagePath_advp=[], labelPath_advp=[], trainRatio_advp = 1.0, reinitBN = False, classification = False, netType=1,
+	adv_step=0.2, n_repeats=3, eps=0.5, before_relu=False):
 	train_network_multi([imagePath], [labelPath], outputPath, modelPath, trainRatio, partialPreModel, reinitHeader, BN_flag, 
-		[imagePath_advp], [labelPath_advp], trainRatio_advp, reinitBN, classification, netType)
+		[imagePath_advp], [labelPath_advp], trainRatio_advp, reinitBN, classification, netType, 
+		adv_step=adv_step, n_repeats=n_repeats, eps=eps, before_relu=before_relu)
 
 def train_network_multi(imagePath_list, labelPath_list, outputPath, modelPath = "", trainRatio = 1.0, partialPreModel = False, reinitHeader = False, 
-	BN_flag=0, imagePath_list_advp=[], labelPath_list_advp=[], trainRatio_advp = 1.0, reinitBN = False, classification = False, netType=1, pack_flag=False):
+	BN_flag=0, imagePath_list_advp=[], labelPath_list_advp=[], trainRatio_advp = 1.0, reinitBN = False, classification = False, netType=1, pack_flag=False,
+	adv_step=0.2, n_repeats=3, eps=0.5, before_relu=False):
 	print('Image folder: ' + str(imagePath_list))
 	print('Label file: ' + str(labelPath_list))
 	print('Output folder: ' + outputPath)
@@ -48,7 +51,8 @@ def train_network_multi(imagePath_list, labelPath_list, outputPath, modelPath = 
     
 	#netType = netType        # 1: CNN, 2: LSTM-m2o, 3: LSTM-m2m, 4: LSTM-o2o, 5: GAN
 	train_dnn_multi(imagePath_list, labelPath_list, outputPath, netType, flags, specs, modelPath, trainRatio, partialPreModel, reinitHeader, 
-		BN_flag, imagePath_list_advp, labelPath_list_advp, trainRatio_advp, reinitBN, pack_flag)
+		BN_flag, imagePath_list_advp, labelPath_list_advp, trainRatio_advp, reinitBN, pack_flag, 
+		adv_step=adv_step, n_repeats=n_repeats, eps=eps, before_relu=before_relu)
 
 
 def train_network_multi_factor_search(imagePath, labelPath, outputPath, modelPath = "", trainRatio = 1.0, partialPreModel = False, reinitHeader = False, 

@@ -1,7 +1,7 @@
 ### This script is the testing file for regression DNN.
 ### Implementation assumptions in test_dnn: 
-    ## netType=1 (CNN), nRep=1, nClass=2, loss function = mse
-    ## fThreeCameras=False, fClassifier=False
+	## netType=1 (CNN), nRep=1, nClass=2, loss function = mse
+	## fThreeCameras=False, fClassifier=False
 
 import sys
 import os
@@ -21,7 +21,7 @@ def test_network_multi(modelPath, imagePath_list, labelPath_list, outputPath, BN
 		print('Model used: ' + modelPath)
 	else:
 		print('No model specified. Using random initialization of weights.')
-        
+		
 	print('Image folder: '+str(imagePath_list))
 	print('Label path: '+str(labelPath_list))
 	print('Output path: '+outputPath)
@@ -60,7 +60,7 @@ def visualize_network_on_image(modelPath, imagePath, label, outputPath, radius=1
 		print('Model used: ' + modelPath)
 	else:
 		print('No model specified. Using random initialization of weights.')
-        
+		
 	print('Image path: '+imagePath)
 	print('Steering angle label: '+str(label))
 	print('Output path: '+outputPath)
@@ -91,7 +91,7 @@ if __name__ == "__main__":
 
 	import argparse
 
-    # Parse command line arguments
+	# Parse command line arguments
 	parser = argparse.ArgumentParser(
 		description='Test Mask R-CNN to detect cityscapes.')
 	parser.add_argument('--model_path', required=False,
@@ -110,17 +110,17 @@ if __name__ == "__main__":
 
 
 	data_root = ROOT_DIR + '/Data/'
-    
-    ### NOTE: the only flags/parameters used in test are fClassifier and nClass. 
-    ### Everything was included in test.py in case other models needed to be used in the future.
-    
+	
+	### NOTE: the only flags/parameters used in test are fClassifier and nClass. 
+	### Everything was included in test.py in case other models needed to be used in the future.
+	
 	## train
-    ## NOTE: paths must have forward slash (/) character at the end
-    
-    # NVIDIA dataset 
+	## NOTE: paths must have forward slash (/) character at the end
+	
+	# NVIDIA dataset 
 	trainPath = data_root + 'udacityA_nvidiaB/'
-    
-    #image folder path
+	
+	#image folder path
 	imagePath = trainPath + 'trainB/'
 	if args.image_folder_path != None:
 		imagePath = args.image_folder_path
@@ -130,12 +130,12 @@ if __name__ == "__main__":
 	if args.label_file_path != None:
 		labelPath = args.label_file_path
 
-    #model weight file path
+	#model weight file path
 	modelPath = None
 	if args.label_file_path != None:
 		modelPath = args.model_path
-        
-    # output path, should be a filename. 
+		
+	# output path, should be a filename. 
 	outputPath = data_root + 'udacityA_nvidiaB_results/test_results/test.txt'
 
 	if args.output_path != None:
@@ -149,7 +149,7 @@ if __name__ == "__main__":
 		print('Model used: ' + modelPath)
 	else:
 		print('No model specified. Using random initialization of weights.')
-        
+		
 	print('Image folder: '+imagePath)
 	print('Label file: '+labelPath)
 # 	print('Output file: '+outputPath)
