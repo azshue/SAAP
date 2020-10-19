@@ -14,6 +14,7 @@ sys.path.insert(0, './library/')
 from learning import test_dnn_multi, test_dnn_visualize, visualize_dnn_on_image
 
 def test_network(modelPath, imagePath, labelPath, outputPath, BN_flag=0, pathID=0, diffAug=False, classification=False, visualize=False, radius=5, ratio=1):
+	print("1 input argument: diffAug  ", diffAug)
 	MA = test_network_multi(modelPath, [imagePath], [labelPath], outputPath, BN_flag, pathID, diffAug, classification, visualize, radius, ratio)
 	return MA
 
@@ -51,6 +52,7 @@ def test_network_multi(modelPath, imagePath_list, labelPath_list, outputPath, BN
 	if visualize:
 		test_dnn_visualize(modelPath, imagePath, labelPath, outputPath, netType, flags, specs, BN_flag, pathID, radius)
 	else:
+		print("0 input argument: diffAug  ", diffAug)
 		MA = test_dnn_multi(modelPath, imagePath_list, labelPath_list, outputPath, netType, flags, specs, BN_flag, pathID, ratio, pack_flag, 
 		diffAug=diffAug)
 

@@ -148,15 +148,15 @@ def test_diffaug(output_name, model, adv_step, n_repeats, eps):
 		degrees = [f.path for f in os.scandir(DATASET_ROOT + val) if f.is_dir()]
 		if degrees == []:
 			imagePath = DATASET_ROOT + val + "/"
-			outputPath = TEST_OUTPUT_ROOT + "(" + train_folder + ")_(" + val + ")/test_result.txt"
-			MA = test_network(modelPath_new, imagePath, labelPath, outputPath)
+			outputPath = test_output_root + "(" + train_folder + ")_(" + val + ")/test_result.txt"
+			MA = test_network(modelPath_new, imagePath, labelPath, outputPath, diffAug=True)
 			cw.writerow([val, "{:.3f}".format(100*MA)])
 			output.write("valB: {}, \t mean accuracy: {:.3f}\n".format(val, 100*MA))
 		else:
 			for degree in degrees:
 				# imagePath = DATASET_ROOT + val_folder + "/" + degree + "/"
 				imagePath = degree + "/"
-				outputPath = TEST_OUTPUT_ROOT + "(" + train_folder + ")_(" + os.path.basename(degree) + ")/test_result.txt"
+				outputPath = test_output_root + "(" + train_folder + ")_(" + os.path.basename(degree) + ")/test_result.txt"
 				if os.path.exists(outputPath):
 					continue
 				MA = test_network(modelPath_new, imagePath, labelPath, outputPath, diffAug=True)

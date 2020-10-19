@@ -460,6 +460,9 @@ class DiffAug_Net(tf.keras.Model):
 
 		self.model = self.get_model()
 
+		self.train_loss_tracker = tf.keras.metrics.Mean(name="loss")
+		self.train_ma_tracker = tf.keras.metrics.Mean(name="ma_mean")
+
 	def get_model(self):
 		mainInput = tf.keras.Input(shape=self.img_shape)
 		x = tf.keras.layers.Lambda(lambda x: x/127.5 - 1.0)(mainInput)
@@ -637,17 +640,21 @@ class DiffAug_Net(tf.keras.Model):
 		self.train_loss_tracker = tf.keras.metrics.Mean(name="loss")
 		self.train_ma_tracker = tf.keras.metrics.Mean(name="ma_mean")
 
+	def mse(self, y_true, y_pred):
+		squared_difference = tf.square(y_true - y_pred)
+		return tf.reduce_mean(squared_difference, axis=-1)
+
 	def call(self, input):
 		x = self.model(input)
 		return x
 
-	@tf.function
-	def train_step(self, batch_data):
+	def my_train_step(self, batch_data, augs):
 		input, target = batch_data
 		input = tf.cast(input, dtype=tf.float32)
 		target = tf.cast(target, dtype=tf.float32)
 
-		for aug in self.augments:
+		# for aug in self.augments:
+		for aug in augs:
 			if self.delta is None:
 				self.delta = tf.Variable(tf.zeros([1]))
 			else:
@@ -689,7 +696,8 @@ class DiffAug_Net(tf.keras.Model):
 
 					x = aug_op(input, param)
 					output = self.model(x)
-					loss = self.loss_fn(output, target)
+					# loss = self.loss_fn(output, target)
+					loss = self.mse(output, target)
 
 				grad = tape.gradient(loss, [self.delta])[0]
 				# tf.print(grad)
@@ -702,29 +710,34 @@ class DiffAug_Net(tf.keras.Model):
 				x = input
 			with tf.GradientTape() as tape:
 				output = self.model(x)
-				loss = self.loss_fn(output, target)
+				# tf.print(tf.shape(output))
+				# loss = self.loss_fn(output, target)
+				# loss = self.loss_fn(target, output)
+				loss = self.mse(output, target)
 
 			grads = tape.gradient(loss, self.model.trainable_weights)
 			self.h_optimizer.apply_gradients(zip(grads, self.model.trainable_weights))
 
 			self.train_loss_tracker.update_state(loss)
 
-		return {
-			"mloss": self.train_loss_tracker.result()
-		}
+		# return {
+		# 	"mloss": self.train_loss_tracker.result()
+		# }
+		return self.train_loss_tracker.result()
 
-	@tf.function
 	def test_step(self, batch_data):
 		input, target = batch_data
 		input = tf.cast(input, dtype=tf.float32)
 		target = tf.cast(target, dtype=tf.float32)
 
 		output = self.model(input)
+		loss = self.mse(target, output)
 		# ma = self.h_metrics(output, target)
 
 		thresh_holds = [0.1, 0.2, 0.5, 1, 2, 5]
 		total_acc = 0
 		prediction_error = tf.math.abs(output-target)
+		# tf.print(prediction_error, tf.shape(prediction_error))
 
 		for thresh_hold in thresh_holds:
 			acc = tf.where(prediction_error < thresh_hold, 1., 0.)
@@ -732,9 +745,13 @@ class DiffAug_Net(tf.keras.Model):
 			total_acc += acc
 
 		ma = total_acc / len(thresh_holds)
+		# tf.print("ma: ", ma)
 
-		return ma
-
+		# return {
+		# 	"loss": loss,
+		# 	"ma": ma
+		# }
+		return loss, ma
 
 
 

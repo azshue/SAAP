@@ -400,7 +400,7 @@ def train_dnn_multi(imageDir_list, labelPath_list, outputPath, netType, flags, s
 			xDataset = x_path.map(load_images_from_path, num_parallel_calls=tf.data.experimental.AUTOTUNE)
 			yDataset = tf.data.Dataset.from_tensor_slices(yTrainList)
 			trainDataset = tf.data.Dataset.zip((xDataset, yDataset))
-			batchTrainDataset = trainDataset.batch(batchSize, drop_remainder=True)
+			batchTrainDataset = trainDataset.shuffle(buffer_size=10000, reshuffle_each_iteration=True).batch(batchSize, drop_remainder=True)
 
 			val_x_path = tf.data.Dataset.from_tensor_slices(xValidList)
 			val_xDataset = val_x_path.map(load_images_from_path, num_parallel_calls=tf.data.experimental.AUTOTUNE)
@@ -408,11 +408,19 @@ def train_dnn_multi(imageDir_list, labelPath_list, outputPath, netType, flags, s
 			valDataset = tf.data.Dataset.zip((val_xDataset, val_yDataset))
 			batchValDataset = valDataset.batch(batchSize, drop_remainder=False)
 			
+			modelLog_tf = tf.keras.callbacks.ModelCheckpoint(
+					outputPath + 'checkpoint/cp-weights-{epoch:02d}.ckpt', save_best_only=False,
+					save_weights_only=True, save_freq=100)
 			lossLog_tf = tf.keras.callbacks.CSVLogger(outputPath + 'train-log', append=True, separator='\t')
 			loss_log = open(outputPath + 'loss-log', "w")
-			net.compile(h_optimizer=tf.keras.optimizers.Adam(1e-4), loss_fn=tf.keras.losses.MeanSquaredError(), h_metrics=mean_accuracy_tf)
+
+			# net.compile(h_optimizer=tf.keras.optimizers.Adam(1e-4), loss_fn=tf.keras.losses.MeanSquaredError(), h_metrics=mean_accuracy_tf)
+			optimizer = tf.keras.optimizers.Adam(1e-4)
+			loss_fn = tf.keras.losses.MeanSquaredError()
+
 			val_ma_tracker = tf.keras.metrics.Mean(name="val_ma")
 			for epoch in range(resume, nEpoch):
+			# for epoch in range(1):
 				print("\n Train Epoch: [{}/{}]".format(epoch, nEpoch))
 				loss_log.write("\n Train Epoch: [{}/{}]".format(epoch,nEpoch))
 				start_time = time.time()
@@ -420,23 +428,100 @@ def train_dnn_multi(imageDir_list, labelPath_list, outputPath, netType, flags, s
 				# iterate over different augmentations
 				for aug in augments:
 					# Iterate over the batches of the dataset.
-					# for step, (x_batch_train, y_batch_train) in enumerate(trainGenerator):
-					# 	mloss, ma = net.train_step((x_batch_train, y_batch_train), aug)
-					# 	if step > nTrainStep:
-					# 		break
-					# print("augmentation: {} \t loss_tracker: {:.4f} \t ma_tracker: {:.4f}\n".format(aug, float(mloss), float(ma)))
-					# loss_log.write("augmentation: {} \t loss_tracker: {:.4f} \t ma_tracker: {:.4f}\n".format(aug, float(mloss), float(ma)))
-					net.augments = aug
-					net.fit(x=batchTrainDataset, shuffle=True, \
-						steps_per_epoch=nTrainStep, epochs=epoch+1, initial_epoch=epoch, \
-						verbose=2,  callbacks=[lossLog_tf], validation_data=None, validation_steps=None)
+					for step, (x_batch_train, y_batch_train) in enumerate(batchTrainDataset):
+						# mloss = net.my_train_step((x_batch_train, y_batch_train), aug)
+						input = tf.cast(x_batch_train, dtype=tf.float32)
+						target = tf.cast(y_batch_train, dtype=tf.float32)
+
+						if net.delta is None:
+							net.delta = tf.Variable(tf.zeros([1]))
+						else:
+							net.delta.assign(tf.zeros([1]))
+
+						for _iter in range(net.n_repeats):
+							with tf.GradientTape() as tape:
+								if aug == '1': # gaussian blur
+									aug_op = getattr(net, "blur")
+									param = net.delta * 100
+									param_min = 0.0
+								elif aug == '2': # gaussian noise
+									aug_op = getattr(net, "gaussian")
+									dist = tfp.distributions.Normal(0, net.delta)
+									param = dist.sample([66, 200, 3])
+									param_min = 0.0
+								# elif aug == '3': #distortion
+								elif aug in ['R', 'G', 'B', 'H', 'S', 'V']: 
+									aug_op = getattr(net, "color_" + aug)
+									param = net.delta
+									param_min = -net.eps
+								elif aug == '7':
+									aug_op = getattr(net, "saturation")
+									param = net.delta + 1
+									param_min = -net.eps
+								elif aug == '8':
+									aug_op = getattr(net, "contrast")
+									param = net.delta + 1
+									param_min = -net.eps
+								elif aug == '9':
+									aug_op = getattr(net, "brightness")
+									param = net.delta
+									param_min = -net.eps
+								elif aug == 'N':
+									aug_op = None
+									break
+								else:
+									print("augmentation not defined")
+
+								x = aug_op(input, param)
+								output = net(x)
+								loss = loss_fn(output, target)
+
+							grad = tape.gradient(loss, [net.delta])[0]
+							net.delta.assign_add(net.adv_step * tf.keras.backend.sign(grad))
+							net.delta.assign(tf.keras.backend.clip(net.delta, min_value=param_min, max_value=net.eps))
+			
+						if aug_op is not None:
+							x = aug_op(input, param)
+						else:
+							x = input
+						with tf.GradientTape() as tape:
+							output = net(x)
+							loss = loss_fn(output, target)
+
+						grads = tape.gradient(loss, net.model.trainable_weights)
+						optimizer.apply_gradients(zip(grads, net.model.trainable_weights))
+
+						net.train_loss_tracker.update_state(loss)
+
+					mloss = net.train_loss_tracker.result()
+					print("augmentation: {} \t loss_tracker: {:.4f} ".format(aug, float(mloss)))
+					loss_log.write("augmentation: {} \t loss_tracker: {:.4f} ".format(aug, float(mloss)))
+					# net.augments = aug
+					# net.fit(x=batchTrainDataset, shuffle=True, \
+					# 	steps_per_epoch=None, epochs=nEpoch, initial_epoch=0, \
+					# 	verbose=2,  callbacks=[lossLog_tf, modelLog_tf], validation_data=batchValDataset, validation_steps=None)
 				# validation
 				for step, (x_batch_val, y_batch_val) in enumerate(batchValDataset):
-					val_ma = net.test_step((x_batch_val, y_batch_val))
+					input = tf.cast(x_batch_val, dtype=tf.float32)
+					target = tf.cast(y_batch_val, dtype=tf.float32)
+
+					output = net(input)
+					val_loss = loss_fn(target, output)
+					thresh_holds = [0.1, 0.2, 0.5, 1, 2, 5]
+					total_acc = 0
+					prediction_error = tf.math.abs(output-target)
+					# tf.print(prediction_error, tf.shape(prediction_error))
+
+					for thresh_hold in thresh_holds:
+						acc = tf.where(prediction_error < thresh_hold, 1., 0.)
+						acc = tf.math.reduce_mean(acc)
+						total_acc += acc
+
+					val_ma = total_acc / len(thresh_holds)
 					val_ma_tracker.update_state(val_ma)
 
-				print("\n Val Epoch: [{}/{}] \t ma: {:.4f}\n".format(epoch, nEpoch, float(val_ma_tracker.result())))
-				loss_log.write("\n Val Epoch: [{}/{}] \t ma: {:.4f}\n".format(epoch, nEpoch, float(val_ma_tracker.result())))
+				print("\n Val Epoch: [{}/{}] \t loss: {:.4f} \t ma: {:.4f} \n".format(epoch, nEpoch, float(val_loss), float(val_ma_tracker.result())))
+				loss_log.write("\n Val Epoch: [{}/{}] \t loss: {:.4f} \t ma: {:.4f}\n".format(epoch, nEpoch, float(val_loss), float(val_ma_tracker.result())))
 				print("Time taken: {:.2f}s".format(time.time() - start_time))
 				loss_log.write("Time taken: {:.2f}s".format(time.time() - start_time))
 				if (epoch + 1) % 100 == 0:
@@ -548,8 +633,11 @@ def test_dnn_multi(modelPath, imageDir_list, labelPath_list, outputPath, netType
 	## choose networks, 1: CNN, 2: LSTM-m2o, 3: LSTM-m2m, 4: LSTM-o2o
 	if netType == 1:
 		if diffAug:
-			net = create_nvidia_network(BN_flag, fClassifier, nClass, nChannel, augment="")
+			print("test DiffAug_Net")
+			net = create_nvidia_network(BN_flag, fClassifier, nClass, nChannel, 
+					augments="", adv_step=0., n_repeats=0, eps=0.)
 			net(tf.ones((1, 66, 200, 3)))
+			net.summary()
 		else:
 			if BN_flag == 3:
 				net = create_nvidia_network(BN_flag, fClassifier, nClass, nChannel, 
@@ -570,15 +658,23 @@ def test_dnn_multi(modelPath, imageDir_list, labelPath_list, outputPath, netType
 	## load model weights
 	if modelPath != "":
 		net.load_weights(modelPath)
+		print("finished loading weight")
 	
 	if BN_flag == 3:
 		inp = [net.featureX.input, net.head.input]
 	else:
-		inp = net.input                                           # input placeholder
+		if diffAug:
+			inp = net.model.input
+		else:
+			inp = net.input                                           # input placeholder
 
 	if BN_flag == 0:
-		outputs = [layer.get_output_at(-1) for layer in net.layers]          # all layer outputs
+		if diffAug:
+			outputs = [layer.get_output_at(-1) for layer in net.model.layers]
+		else:
+			outputs = [layer.get_output_at(-1) for layer in net.layers]          # all layer outputs
 		outputs = outputs[1:]
+		print(outputs)
 		last_conv_id = 10
 	elif BN_flag == 1:
 		outputs = [layer.get_output_at(-1) for layer in net.layers]          # all layer outputs
@@ -651,7 +747,7 @@ def test_dnn_multi(modelPath, imageDir_list, labelPath_list, outputPath, netType
 			f_BN.write("{:.5f}\n".format(std))
 		f_BN.close()
 
-
+	print(outputPath)
 	if outputPath != "":
 		f = open(outputPath,'w')
 	if fClassifier:
