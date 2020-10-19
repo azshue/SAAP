@@ -3,10 +3,12 @@
 import cv2  
 import os
 import shutil
+import functools
 import numpy as np
 
-import keras
 import tensorflow as tf
+import keras
+
 from keras.utils.np_utils import to_categorical
 from keras.callbacks import ModelCheckpoint, CSVLogger
 from keras import backend as K
@@ -73,7 +75,40 @@ def gen_train_data_lstm_m2o(xList, yList, batchSize, nFramesSample):
 				X = np.empty((batchSize, nFramesSample, featureSample.shape[0], featureSample.shape[1], featureSample.shape[2]))
 				y = np.empty((batchSize, 1))
 				sampleCount = 0
-					
+
+# class ImageDataset(tf.data.Dataset):
+	# def _generator(xList, yList, batchSize):
+		# xList, yList = shuffle(xList, yList)
+		# X,y = ([],[])
+		# while True:       
+			# for i in range(len(yList)):
+				# image_path = xList[i]
+				# if not os.path.isfile(image_path):
+					# image_path = image_path.replace(".jpg", "_fake.png")
+				# img = resize_image(cv2.imread(image_path))
+				# angle = yList[i]
+				# X.append(img)
+				# y.append(angle)
+# 
+				# when a batch is ready, yield, and prepare for the next batch
+				# if len(X) == batchSize:
+					# yield (np.array(X), np.array(y))
+					# X, y = ([],[])
+					# xList, yList = shuffle(xList, yList)
+# 
+	# def __new__(cls, xList, yList, batchSize):
+		# return tf.data.Dataset.from_generator(
+			# cls._generator,
+			# output_types = (tf.float32, tf.float32),
+			# args = (xList, yList, batchSize)
+		# )
+
+def load_images_from_path(path):
+	image = tf.io.read_file(path)
+	image = tf.image.decode_jpeg(image, channels=3)
+	image = tf.image.resize(image, [66, 200], method='area')
+	img = image[..., ::-1]
+	return img
 						
 def gen_train_data_random(xList, yList, batchSize, fRandomDistort = False, fFlip = False):
 	xList, yList = shuffle(xList, yList)
@@ -206,71 +241,6 @@ def gen_train_data_random_AdvProp(xList, yList, xList_advp, yList_advp, batchSiz
 						xList, yList = shuffle(xList, yList)
 
 
-'''
-def train_dnn(imageDir, labelPath, outputPath, netType, flags, specs):
-	
-	## assigning variables
-	fRandomDistort = flags[0]
-	fThreeCameras  = flags[1]
-	fClassifier    = flags[2]
-	batchSize 	   = specs[0]
-	nEpoch 		   = specs[1]
-	nClass         = specs[2]
-	nFramesSample  = specs[3]
-	nRep  = specs[4]
-	
-	## prepare the data
-	xList, yList = load_train_data(imageDir, labelPath, nRep, fThreeCameras)
-	xTrainList, xValidList = train_test_split(np.array(xList), test_size=0.1, random_state=42)
-	yTrainList, yValidList = train_test_split(np.array(yList), test_size=0.1, random_state=42)
-	
-	## change the data format if necessary
-	if fClassifier:
-		print('\n######### Classification #########')
-		yTrainList = to_categorical(yTrainList, num_classes = nClass)
-		yValidList = to_categorical(yValidList, num_classes = nClass)
-	else:
-		print('\n######### Regression #########')
-		
-	print('Train data:', xTrainList.shape, yTrainList.shape)
-	print('Valid data:', xValidList.shape, yValidList.shape)
-	print('##############################\n')
-	
-	## choose networks, 1: CNN, 2: LSTM-m2o, 3: LSTM-m2m, 4: LSTM-o2o
-	if netType == 1:
-# 		outputPath = trainPath + 'trainedModels/models-cnn/';
-		net = net_nvidia(fClassifier, nClass)
-		trainGenerator = gen_train_data_random(xTrainList, yTrainList, batchSize)
-		validGenerator = gen_train_data_random(xValidList, yValidList, batchSize)
-	elif netType == 2:
-# 		outputPath = trainPath + 'trainedModels/models-lstm-m2o/'
-		net = net_lstm(2, nFramesSample)
-		trainGenerator = gen_train_data_lstm_m2o(xTrainList, yTrainList, batchSize, nFramesSample)
-		validGenerator = gen_train_data_lstm_m2o(xValidList, yValidList, batchSize, nFramesSample)
-	elif netType == 3:
-# 		outputPath = trainPath + 'trainedModels/models-lstm-m2m/'
-		net = net_lstm(3, nFramesSample)
-		trainGenerator = gen_train_data_lstm_m2m(xTrainList, yTrainList, batchSize, nFramesSample)
-		validGenerator = gen_train_data_lstm_m2m(xValidList, yValidList, batchSize, nFramesSample)
-
-	## setup outputs
-	if not os.path.exists(outputPath):
-		os.makedirs(outputPath)
-	else:
-		shutil.rmtree(outputPath)
-		os.makedirs(outputPath)
-	modelLog = ModelCheckpoint(outputPath + 'model{epoch:02d}.h5', monitor='val_loss', save_best_only=True)
-	lossLog  = CSVLogger(outputPath + 'loss-log', append=True, separator=',')
-	
-	## train
-	nTrainStep = int(len(yTrainList)/batchSize) + 1
-	nValidStep = int(len(yValidList)/batchSize) + 1
-	net.fit_generator(trainGenerator, steps_per_epoch=nTrainStep, epochs=nEpoch, \
-	verbose=2, callbacks=[modelLog,lossLog], validation_data=validGenerator, validation_steps=nValidStep)
-	net.save(outputPath + 'model-final.h5')
-	print(net.summary())
-'''
-
 def normalize_value(value_list):
 	THRESH_HOLDS = 24
 	value_list = np.clip(value_list, -THRESH_HOLDS, THRESH_HOLDS)
@@ -280,7 +250,7 @@ def normalize_value(value_list):
 def train_dnn_multi(imageDir_list, labelPath_list, outputPath, netType, flags, specs, modelPath = "", 
 	trainRatio = 1.0, partialPreModel = False, reinitHeader = False, 
 	BN_flag=0, imageDir_list_advp=[], labelPath_list_advp=[], trainRatio_advp = 1.0, reinitBN = False, pack_flag=False,
-	adv_step=0.2, n_repeats=3, eps=0.5, before_relu=False):
+	augments=None, adv_step=0.2, n_repeats=3, eps=0.5, before_relu=False, resume=0):
 	
 	## assigning variables
 	fRandomDistort = flags[0]
@@ -328,12 +298,18 @@ def train_dnn_multi(imageDir_list, labelPath_list, outputPath, netType, flags, s
 		nChannel = 3
 		if pack_flag:
 			nChannel = 3*len(imageDir_list)
-		if BN_flag == 3:
+		if augments is not None:
 			net = create_nvidia_network(BN_flag, fClassifier, nClass, nChannel, 
-						adv_step=adv_step, n_repeats=n_repeats, eps=eps, before_relu=before_relu)
-			print("AdvBN model created")
+							augments=augments, adv_step=adv_step, n_repeats=n_repeats, eps=eps)
+			net(tf.ones((1, 66, 200, 3)))
+			print("DiffAug model created")
 		else:
-			net = create_nvidia_network(BN_flag, fClassifier, nClass, nChannel)
+			if BN_flag == 3:
+				net = create_nvidia_network(BN_flag, fClassifier, nClass, nChannel, 
+							adv_step=adv_step, n_repeats=n_repeats, eps=eps, before_relu=before_relu)
+				print("AdvBN model created")
+			else:
+				net = create_nvidia_network(BN_flag, fClassifier, nClass, nChannel)
 		if BN_flag <= 1 or BN_flag == 3:
 			if not pack_flag:
 				trainGenerator = gen_train_data_random(xTrainList, yTrainList, batchSize)
@@ -361,10 +337,10 @@ def train_dnn_multi(imageDir_list, labelPath_list, outputPath, netType, flags, s
 		validGenerator = gen_train_data_random(xValidList, yValidList, batchSize)
 
 	if modelPath != "":
-		print("pretrain modelPath: ", modelPath)
+		print("loading pretrain modelPath: ", modelPath)
 		if BN_flag == 3:
 			net(tf.ones((1, 66, 200, 3)))
-		net.load_weights(modelPath, by_name=True)
+		net.load_weights(modelPath)
 		# print(partialPreModel)
 		if partialPreModel:
 			print("partial PreModel activate")
@@ -390,7 +366,14 @@ def train_dnn_multi(imageDir_list, labelPath_list, outputPath, netType, flags, s
 			#net.compile(optimizer=keras.optimizers.Adam(lr=1e-4), loss='mse', metrics=['accuracy'])
 		if BN_flag == 3:
 			print('load weight for AdvBN fine-tuning')
-			net.compile(h_optimizer=tf.keras.optimizers.Adam(lr=1e-5), loss_fn=tf.keras.losses.MeanSquaredError(), h_metrics=mean_accuracy_tf)
+			# step = tf.Variable(0, trainable=False)
+			# boundaries = [200, 400]
+			# values = [1e-5, 5e-6, 1e-6]
+			# learning_rate_fn = tf.keras.optimizers.schedules.PiecewiseConstantDecay(
+				# boundaries, values)
+			# Later, whenever we perform an optimization step, we pass in the step.
+			# learning_rate = learning_rate_fn(step)
+			net.compile(h_optimizer=tf.keras.optimizers.Adam(1e-5), loss_fn=tf.keras.losses.MeanSquaredError(), h_metrics=mean_accuracy_tf)
 			print(net.summary())
 			print('trainable weight:')
 			for var in net.trainable_weights:
@@ -410,16 +393,66 @@ def train_dnn_multi(imageDir_list, labelPath_list, outputPath, netType, flags, s
 
 	## train
 	if netType != 5:
-		nTrainStep = int(len(yTrainList)/batchSize) + 1
-		nValidStep = int(len(yValidList)/batchSize) + 1
-		if BN_flag == 3:
-			modelLog_tf = tf.keras.callbacks.ModelCheckpoint(outputPath + 'model{epoch:02d}.h5', monitor='val_loss', save_best_only=True)
-			lossLog_tf  = tf.keras.callbacks.CSVLogger(outputPath + 'loss-log', append=True, separator=',')
-			net.fit(x=trainGenerator, steps_per_epoch=nTrainStep, epochs=nEpoch, \
-			verbose=2, callbacks=[modelLog_tf,lossLog_tf], validation_data=validGenerator, validation_steps=nValidStep)
-		else:
-			net.fit_generator(trainGenerator, steps_per_epoch=nTrainStep, epochs=nEpoch, \
-			verbose=2, callbacks=[modelLog,lossLog], validation_data=validGenerator, validation_steps=nValidStep)
+		nTrainStep = int(len(yTrainList)/batchSize)
+		nValidStep = int(len(yValidList)/batchSize)
+		if augments is not None:
+			x_path = tf.data.Dataset.from_tensor_slices(xTrainList)
+			xDataset = x_path.map(load_images_from_path, num_parallel_calls=tf.data.experimental.AUTOTUNE)
+			yDataset = tf.data.Dataset.from_tensor_slices(yTrainList)
+			trainDataset = tf.data.Dataset.zip((xDataset, yDataset))
+			batchTrainDataset = trainDataset.batch(batchSize, drop_remainder=True)
+
+			val_x_path = tf.data.Dataset.from_tensor_slices(xValidList)
+			val_xDataset = val_x_path.map(load_images_from_path, num_parallel_calls=tf.data.experimental.AUTOTUNE)
+			val_yDataset = tf.data.Dataset.from_tensor_slices(yValidList)
+			valDataset = tf.data.Dataset.zip((val_xDataset, val_yDataset))
+			batchValDataset = valDataset.batch(batchSize, drop_remainder=False)
+			
+			lossLog_tf = tf.keras.callbacks.CSVLogger(outputPath + 'train-log', append=True, separator='\t')
+			loss_log = open(outputPath + 'loss-log', "w")
+			net.compile(h_optimizer=tf.keras.optimizers.Adam(1e-4), loss_fn=tf.keras.losses.MeanSquaredError(), h_metrics=mean_accuracy_tf)
+			val_ma_tracker = tf.keras.metrics.Mean(name="val_ma")
+			for epoch in range(resume, nEpoch):
+				print("\n Train Epoch: [{}/{}]".format(epoch, nEpoch))
+				loss_log.write("\n Train Epoch: [{}/{}]".format(epoch,nEpoch))
+				start_time = time.time()
+
+				# iterate over different augmentations
+				for aug in augments:
+					# Iterate over the batches of the dataset.
+					# for step, (x_batch_train, y_batch_train) in enumerate(trainGenerator):
+					# 	mloss, ma = net.train_step((x_batch_train, y_batch_train), aug)
+					# 	if step > nTrainStep:
+					# 		break
+					# print("augmentation: {} \t loss_tracker: {:.4f} \t ma_tracker: {:.4f}\n".format(aug, float(mloss), float(ma)))
+					# loss_log.write("augmentation: {} \t loss_tracker: {:.4f} \t ma_tracker: {:.4f}\n".format(aug, float(mloss), float(ma)))
+					net.augments = aug
+					net.fit(x=batchTrainDataset, shuffle=True, \
+						steps_per_epoch=nTrainStep, epochs=epoch+1, initial_epoch=epoch, \
+						verbose=2,  callbacks=[lossLog_tf], validation_data=None, validation_steps=None)
+				# validation
+				for step, (x_batch_val, y_batch_val) in enumerate(batchValDataset):
+					val_ma = net.test_step((x_batch_val, y_batch_val))
+					val_ma_tracker.update_state(val_ma)
+
+				print("\n Val Epoch: [{}/{}] \t ma: {:.4f}\n".format(epoch, nEpoch, float(val_ma_tracker.result())))
+				loss_log.write("\n Val Epoch: [{}/{}] \t ma: {:.4f}\n".format(epoch, nEpoch, float(val_ma_tracker.result())))
+				print("Time taken: {:.2f}s".format(time.time() - start_time))
+				loss_log.write("Time taken: {:.2f}s".format(time.time() - start_time))
+				if (epoch + 1) % 100 == 0:
+					net.save_weights(filepath= outputPath + 'checkpoint/cp-weights-{:02d}.ckpt'.format(epoch))
+
+		else:	
+			if BN_flag == 3:
+				modelLog_tf = tf.keras.callbacks.ModelCheckpoint(
+					outputPath + 'checkpoint/cp-weights-{epoch:02d}.ckpt', monitor='val_loss', save_best_only=False,
+					save_weights_only=True, save_freq=100)
+				lossLog_tf  = tf.keras.callbacks.CSVLogger(outputPath + 'loss-log', append=True, separator=',')
+				net.fit(x=trainGenerator, steps_per_epoch=nTrainStep, epochs=nEpoch, \
+				verbose=2, callbacks=[modelLog_tf,lossLog_tf], validation_data=validGenerator, validation_steps=nValidStep)
+			else:
+				net.fit_generator(trainGenerator, steps_per_epoch=nTrainStep, epochs=nEpoch, \
+				verbose=2, callbacks=[modelLog,lossLog], validation_data=validGenerator, validation_steps=nValidStep)
 	else:
 		for [x_batch, y_batch] in trainGenerator:
 			print(x_batch.shape)
@@ -436,117 +469,10 @@ def train_dnn_multi(imageDir_list, labelPath_list, outputPath, netType, flags, s
 	net.save(outputPath + 'model-final.h5')
 	print(net.summary())
 	
-	
-'''
-def train_nv_icra19(trainPath, trainSet, repSet, outputPath, batchSize, nEpoch):
-	
-	## prepare the data
-	xList = [];
-	yList = [];
-	for i in range(len(repSet)):
-		print(trainPath + trainSet[i] + '/')
-		xTmp, yTmp = load_train_data(trainPath + trainSet[i] + '/', repSet[i], False)
-		xList = xList + xTmp;
-		yList = yList + yTmp;
-		
-	xTrainList, xValidList = train_test_split(np.array(xList), test_size=0.1, random_state=42)
-	yTrainList, yValidList = train_test_split(np.array(yList), test_size=0.1, random_state=42)
-	
-	print('\n######### Regression #########')
-	print('Train data:', xTrainList.shape, yTrainList.shape)
-	print('Valid data:', xValidList.shape, yValidList.shape)
-	print('##############################\n')
-		
-	outputPath = outputPath + 'output/models-cnn/';
-	net = net_nvidia(False, -1)
-	trainGenerator = gen_train_data_random(xTrainList, yTrainList, batchSize)
-	validGenerator = gen_train_data_random(xValidList, yValidList, batchSize)
-	
-	## setup outputs
-	if not os.path.exists(outputPath):
-		os.makedirs(outputPath)
-	else:
-		shutil.rmtree(outputPath)
-		os.makedirs(outputPath)
-	modelLog = ModelCheckpoint(outputPath + 'model{epoch:02d}.h5', monitor='val_loss', save_best_only=True)
-	lossLog  = CSVLogger(outputPath + 'loss-log', append=True, separator=',')
-	
-	## train
-	nTrainStep = int(len(yTrainList)/batchSize)
-	nValidStep = int(len(yValidList)/batchSize)
-	net.fit_generator(trainGenerator, steps_per_epoch=nTrainStep, epochs=nEpoch, \
-	verbose=2, callbacks=[modelLog,lossLog], validation_data=validGenerator, validation_steps=nValidStep)
-	#net.save(outputFolder + 'model-final.h5')
-	print(net.summary())
-'''
-	
-	
-	
-'''
-def train_dnn_overfitting(trainSpec, xTrainList, yTrainList, xValidList, yValidList):	
-	## assign variables
-	outputFolder = trainSpec[0]
-	batchSize    = trainSpec[1]
-	nEpoch       = trainSpec[2]
-	isClassify   = trainSpec[3]
-	nClass       = trainSpec[4]
-	randomDistortFlag = False
-	
-	## pulling out 128 random samples and training just on them, to make sure the model is capable of overfitting
-	tmpIndices = np.random.randint(0, len(xTrainList), 128)
-	xTrainList = xTrainList[tmpIndices]
-	yTrainList = yTrainList[tmpIndices]
-	
-	tmpIndices = np.random.randint(0, len(xValidList), 12)
-	xValidList = xValidList[tmpIndices]
-	yValidList = yValidList[tmpIndices]
-	
-	
-	X,y = ([],[])  
-	for i in range(len(yTrainList)):
-		img = resize_image(cv2.imread(xTrainList[i]))
-		angle = yTrainList[i]
-		X.append(img)
-		y.append(angle)
-	X = np.array(X)
-	y = np.array(y)
-	
-	X_val, y_val = ([],[]) 
-	for i in range(len(yValidList)):
-		img = resize_image(cv2.imread(xValidList[i]))
-		angle = yValidList[i]
-		X_val.append(img)
-		y_val.append(angle)
-	X_val = np.array(X_val)
-	y_val = np.array(y_val)
-		
-		
-	## get a network
-	net = net_testing(isClassify, nClass)
-
-	## initialize generators
-	if isClassify:
-		print('\n######### Classification #########')
-		trainLabelList = to_categorical(yTrainList, num_classes = nClass)
-		validLabelList = to_categorical(yValidList, num_classes = nClass)
-	else:
-		print('\n######### Regression #########')
-		
-	print('Train data:', xTrainList.shape, yTrainList.shape)
-	print('Valid data:', xValidList.shape, yValidList.shape)
-	print('############################\n')
-		
-
-	# Fit the model
-	history = net.fit(X, y, epochs=10, verbose=2, validation_data = (X_val,y_val), shuffle = True)
-	net.save(outputFolder + 'model-final.h5')
-	#print(net.summary())
-
-'''
 
 	
 def test_dnn_multi(modelPath, imageDir_list, labelPath_list, outputPath, netType, flags, specs, BN_flag=0, pathID=0, ratio=1, pack_flag=False,
-	adv_step=0.2, n_repeats=3, eps=0.5, before_relu=False):
+	diffAug=False, adv_step=0.2, n_repeats=3, eps=0.5, before_relu=False):
 	
 	## assigning variables
 # 	fRandomDistort = flags[0]
@@ -558,8 +484,8 @@ def test_dnn_multi(modelPath, imageDir_list, labelPath_list, outputPath, netType
 	nFramesSample  = specs[3]
 	nRep  = specs[4]
 	
-	print('\n\n\n')
-	print('********************************************')
+	# print('\n\n\n')
+	# print('********************************************')
 	
 	if fClassifier:
 		print('Classification......')
@@ -584,7 +510,7 @@ def test_dnn_multi(modelPath, imageDir_list, labelPath_list, outputPath, netType
 		testLabels = normalize_value(testLabels)
 		testLabels = to_categorical(testLabels, num_classes = nClass)
 	
-	print(testFeatures)
+	# print(testFeatures)
 	print('The number of tested data: ' + str(testLabels.shape))
 	print('********************************************')
 	testData = []
@@ -592,6 +518,7 @@ def test_dnn_multi(modelPath, imageDir_list, labelPath_list, outputPath, netType
 		for i in range(len(testLabels)):
 			image_path = testFeatures[i]
 			if not os.path.isfile(image_path):
+				print("image not exist: ", image_path)
 				image_path = image_path.replace(".jpg", "_fake.png")
 			img = resize_image(cv2.imread(image_path))
 			testData.append(img)
@@ -620,12 +547,16 @@ def test_dnn_multi(modelPath, imageDir_list, labelPath_list, outputPath, netType
 
 	## choose networks, 1: CNN, 2: LSTM-m2o, 3: LSTM-m2m, 4: LSTM-o2o
 	if netType == 1:
-# 		outputPath = trainPath + 'trainedModels/models-cnn/';
-		if BN_flag == 3:
-			net = create_nvidia_network(BN_flag, fClassifier, nClass, nChannel, 
-						adv_step=adv_step, n_repeats=n_repeats, eps=eps, before_relu=before_relu)
+		if diffAug:
+			net = create_nvidia_network(BN_flag, fClassifier, nClass, nChannel, augment="")
+			net(tf.ones((1, 66, 200, 3)))
 		else:
-			net = create_nvidia_network(BN_flag, fClassifier, nClass, nChannel)
+			if BN_flag == 3:
+				net = create_nvidia_network(BN_flag, fClassifier, nClass, nChannel, 
+							adv_step=adv_step, n_repeats=n_repeats, eps=eps, before_relu=before_relu)
+				net(tf.ones((1, 66, 200, 3)))
+			else:
+				net = create_nvidia_network(BN_flag, fClassifier, nClass, nChannel)
 	elif netType == 2:
 # 		outputPath = trainPath + 'trainedModels/models-lstm-m2o/'
 		net = net_lstm(2, nFramesSample)
@@ -634,13 +565,16 @@ def test_dnn_multi(modelPath, imageDir_list, labelPath_list, outputPath, netType
 		net = net_lstm(3, nFramesSample)
 
 	#print(net.layers[3].get_weights())
-	print(net.summary())
+	# print(net.summary())
 	
 	## load model weights
 	if modelPath != "":
 		net.load_weights(modelPath)
-
-	inp = net.input                                           # input placeholder
+	
+	if BN_flag == 3:
+		inp = [net.featureX.input, net.head.input]
+	else:
+		inp = net.input                                           # input placeholder
 
 	if BN_flag == 0:
 		outputs = [layer.get_output_at(-1) for layer in net.layers]          # all layer outputs
@@ -664,15 +598,24 @@ def test_dnn_multi(modelPath, imageDir_list, labelPath_list, outputPath, netType
 				outputs.append(layer.get_output_at(0))
 				outputs.append(layer.get_output_at(1))
 		last_conv_id = 22
-	# elif BN_flag == 3:
+	elif BN_flag == 3:
+		outputs_1 = [layer.get_output_at(-1) for layer in net.featureX.layers] 
+		outputs_2 = [layer.get_output_at(-1) for layer in net.head.layers] 
+		outputs = outputs_1[1:] + outputs_2[1:]
+		last_conv_id = 10
 
 
-
-	functor = K.function([inp], outputs )   # evaluation function
+	if BN_flag == 3:
+		functor = K.function(inp, outputs )   # evaluation function
+	else:
+		functor = K.function([inp], outputs )   # evaluation function
 	
 	### predict and output
 	if BN_flag <= 1:
 		layer_outs = functor(testData)
+		predictResults = layer_outs[-1]
+	elif BN_flag == 3:
+		layer_outs = functor([testData, net.featureX(testData)])
 		predictResults = layer_outs[-1]
 	else:
 		layer_outs = functor([testData, testData])
@@ -756,7 +699,7 @@ def test_dnn_multi(modelPath, imageDir_list, labelPath_list, outputPath, netType
 
 			acc = np.sum(np.abs(prediction_error) < thresh_hold) / len(testLabels)
 			acc_list.append(acc)
-			print("accuracy (+-" + str(thresh_hold) + "): " + str(acc))
+			# print("accuracy (+-" + str(thresh_hold) + "): " + str(acc))
 
 			if outputPath != "":
 				f.write("accuracy (+-{:.3f}): {:.5f}\n".format(thresh_hold, acc))
@@ -820,8 +763,8 @@ def test_dnn_multi(modelPath, imageDir_list, labelPath_list, outputPath, netType
 # 		print([str('%.4f' % float(j)) for j in predictResults[i]])
 
 			
-	print('********************************************')
-	print('\n\n\n')
+	# print('********************************************')
+	# print('\n\n\n')
 
 	K.clear_session()
 

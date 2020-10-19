@@ -2,6 +2,8 @@
 
 import sys
 import os
+import time
+import csv
 
 ROOT_DIR = os.path.abspath("../")
 print('PLATFORM_ROOT_DIR ', ROOT_DIR)
@@ -17,18 +19,18 @@ from library.fid_score import *
 
 DATASET_ROOT = ROOT_DIR + "/Data/udacityA_nvidiaB/"
 # OUTPUT_ROOT = ROOT_DIR + "/Data/udacityA_nvidiaB_results/"
-OUTPUT_ROOT = ROOT_DIR + "/Data/udacityA_nvidiaB_advbn_results/"
+OUTPUT_ROOT = ROOT_DIR + "/Data/udacityA_nvidiaB_advbn2011_results/"
 TRAIN_OUTPUT_ROOT = OUTPUT_ROOT + "train_results/"
-TEST_OUTPUT_ROOT = OUTPUT_ROOT + "test_results/"
+TEST_OUTPUT_ROOT = OUTPUT_ROOT + "test_results_e899/"
 
-if not os.path.exists(OUTPUT_ROOT):
-	os.mkdir(OUTPUT_ROOT)
+# if not os.path.exists(OUTPUT_ROOT):
+# 	os.mkdir(OUTPUT_ROOT)
 
-if not os.path.exists(TRAIN_OUTPUT_ROOT):
-	os.mkdir(TRAIN_OUTPUT_ROOT)
+# if not os.path.exists(TRAIN_OUTPUT_ROOT):
+# 	os.mkdir(TRAIN_OUTPUT_ROOT)
 
-if not os.path.exists(TEST_OUTPUT_ROOT):
-	os.mkdir(TEST_OUTPUT_ROOT)
+# if not os.path.exists(TEST_OUTPUT_ROOT):
+# 	os.mkdir(TEST_OUTPUT_ROOT)
 
 def get_label_file_name(folder_name, suffix=""):
 	if "valA" in folder_name:
@@ -58,46 +60,172 @@ def get_label_file_name(folder_name, suffix=""):
 
 def single_test():
 	train_folder = "trainB"
-	val_folder = "valB"
+	val_folder = "darkerV"
+	degrees = [f.path for f in os.scandir(DATASET_ROOT + val_folder) if f.is_dir()]
 
 	imagePath = DATASET_ROOT + train_folder + "/"
 	labelName = get_label_file_name(train_folder)
 	labelPath = DATASET_ROOT + labelName
 
 	outputPath = TRAIN_OUTPUT_ROOT + train_folder + "/"
-	train_network(imagePath, labelPath, outputPath)
+	# train_network(imagePath, labelPath, outputPath)
 
 	modelPath = outputPath + "/model-final.h5"
 
-	imagePath = DATASET_ROOT + val_folder + "/"
-	labelName = get_label_file_name(val_folder, "")
+	
+	labelName = get_label_file_name("valB", "")
 	labelPath = DATASET_ROOT + labelName
 	#labelPath = DATASET_ROOT + "labelsB_train.csv"
+	for degree in degrees:
+		imagePath = degree + "/"
+		outputPath = TEST_OUTPUT_ROOT + "(" + train_folder + ")_(" + os.path.basename(degree) + ")/test_result.txt"
+		#modelPath = ""
+		test_network(modelPath, imagePath, labelPath, outputPath)
 
-	outputPath = TEST_OUTPUT_ROOT + "(" + train_folder + ")_(" + val_folder + ")/test_result.txt"
-	#modelPath = ""
-	test_network(modelPath, imagePath, labelPath, outputPath)
+def train_diffaug(output_name, resume, augments, adv_step, n_repeats, eps):
+	train_folder = "trainB"
+
+	output_root = DATASET_ROOT[:-1] + output_name + "/"
+	train_output_root = output_root + "train_results/"
+
+	if not os.path.exists(output_root):
+		os.mkdir(output_root)
+	if not os.path.exists(train_output_root):
+		os.mkdir(train_output_root)
+
+	imagePath = DATASET_ROOT + train_folder + "/"
+	labelName = get_label_file_name(train_folder)
+	labelPath = DATASET_ROOT + labelName
+
+	outputPath = train_output_root + train_folder + "/"
+	start_epoch = 0
+	if resume is not "":
+		start_epoch = int(resume)
+		resume = outputPath + "checkpoint/cp-weights-" + resume + ".ckpt"
+		
+	train_network(imagePath, labelPath, outputPath, modelPath=resume, 
+				augments=augments, adv_step=adv_step, n_repeats=n_repeats, eps=eps, resume=start_epoch)
+
+	
+
+def test_diffaug(output_name, model, adv_step, n_repeats, eps):
+	output_root = DATASET_ROOT[:-1] + output_name + "/"
+	test_output_root = output_root + "test_results_" + model + "/"
+	train_folder = "trainB"
+	train_output_root = output_root + "train_results/"
+
+	if not os.path.exists(output_root):
+		print("output dir not exist")
+	if not os.path.exists(test_output_root):
+		os.mkdir(test_output_root)
+	
+	outputPath = train_output_root + train_folder + "/"
+	modelPath_new = outputPath + "checkpoint/cp-weights-" + model + ".ckpt"
+
+	val_folders = ["valB"]
+	#val_folders.extend(["blur", 'distort', 'noise', 'combined',
+	#			   'darkerR', 'darkerG', 'darkerB', 'darkerH', 'darkerS', 'darkerV',
+	#			   'lighterR', 'lighterG', 'lighterB', 'lighterH', 'lighterS', 'lighterV'])
+	#val_folders.extend(["valB_IMGC/" + os.path.basename(f.path) for f in os.scandir(DATASET_ROOT + "valB_IMGC") if f.is_dir()])
+	print("testing: ", val_folders)
+
+	now = int(round(time.time()*1000))
+	now02 = time.strftime('%Y%m%d-%H-%M-%S',time.localtime(now/1000))
+	outputPath = test_output_root + "val_log_" + os.path.basename(modelPath_new).replace(".", "-") + now02 + ".log"
+	output = open(outputPath, "w")
+	val_logPath = test_output_root + "val_log_" + os.path.basename(modelPath_new).replace(".", "-") + now02 + ".csv"
+	val_log = open(val_logPath, "wt", newline="")
+	cw = csv.writer(val_log)
+	cw.writerow([val_log])
+	output.write("testing model: {}\n".format(modelPath_new))
+	cw.writerow(["valB Set", "degree", "mean_accuracy"])
+
+	labelName = get_label_file_name("valB", "")
+	labelPath = DATASET_ROOT + labelName
+	for val in val_folders:
+		cw.writerow([" ", "\t\t\t valB_{:s} \t\t\t".format(val), " "])
+		output.write("\t\t\t valB_{:s} \t\t\t\n".format(val))
+		degrees = [f.path for f in os.scandir(DATASET_ROOT + val) if f.is_dir()]
+		if degrees == []:
+			imagePath = DATASET_ROOT + val + "/"
+			outputPath = TEST_OUTPUT_ROOT + "(" + train_folder + ")_(" + val + ")/test_result.txt"
+			MA = test_network(modelPath_new, imagePath, labelPath, outputPath)
+			cw.writerow([val, "{:.3f}".format(100*MA)])
+			output.write("valB: {}, \t mean accuracy: {:.3f}\n".format(val, 100*MA))
+		else:
+			for degree in degrees:
+				# imagePath = DATASET_ROOT + val_folder + "/" + degree + "/"
+				imagePath = degree + "/"
+				outputPath = TEST_OUTPUT_ROOT + "(" + train_folder + ")_(" + os.path.basename(degree) + ")/test_result.txt"
+				if os.path.exists(outputPath):
+					continue
+				MA = test_network(modelPath_new, imagePath, labelPath, outputPath, diffAug=True)
+				cw.writerow([val, os.path.basename(degree), "{:.3f}".format(100*MA)])
+				output.write("valB: {}, \t degree: {}, \t mean accuracy: {:.3f}\n".format(val, os.path.basename(degree), 100*MA))
+
+	val_log.close()
+	output.close()
 
 def single_test_advbn(adv_step, n_repeats, eps, before_relu):
 	train_folder = "trainB"
-	val_folder = "valB"
+	# val_folders = ["valB"]
+	# val_folders = ["blur", 'distort', 'noise', 'combined',
+				#    'darkerR', 'darkerG', 'darkerB', 'darkerH', 'darkerS', 'darkerV',
+				#    'lighterR', 'lighterG', 'lighterB', 'lighterH', 'lighterS', 'lighterV']
+	# val_folders.extend(["valB_IMGC/" + os.path.basename(f.path) for f in os.scandir(DATASET_ROOT + "valB_IMGC") if f.is_dir()])
+	# print("testing: ", val_folders)
+	
 
 	imagePath = DATASET_ROOT + train_folder + "/"
 	labelName = get_label_file_name(train_folder)
 	labelPath = DATASET_ROOT + labelName
 
 	outputPath = TRAIN_OUTPUT_ROOT + train_folder + "/"
-	modelPath = ROOT_DIR + "/Data/udacityA_nvidiaB_advbn_results/train_results/trainB/model-init.h5"
+	modelPath = ROOT_DIR + "/Data/udacityA_nvidiaB_advbn2011lr_results/train_results/trainB/checkpoint/cp-weights-199.ckpt"
 	train_network(imagePath, labelPath, outputPath, modelPath=modelPath, BN_flag=3, adv_step=adv_step, n_repeats=n_repeats, eps=eps, before_relu=before_relu)
 
-	# modelPath_new = outputPath + "/model-advbn.h5"
+	modelPath_new = outputPath + "/checkpoint/cp-weights-899.ckpt"
+	# modelPath_new = ROOT_DIR + "/Data/udacityA_nvidiaB_advbn_results/train_results/trainB/init_weights/init"
 
-	# imagePath = DATASET_ROOT + val_folder + "/"
-	# labelName = get_label_file_name(val_folder, "")
+	# now = int(round(time.time()*1000))
+	# now02 = time.strftime('%Y%m%d-%H-%M-%S',time.localtime(now/1000))
+	# outputPath = TEST_OUTPUT_ROOT + "val_log_" + os.path.basename(modelPath_new).replace(".", "-") + now02 + ".log"
+	# output = open(outputPath, "w")
+	# val_logPath = TEST_OUTPUT_ROOT + "val_log_" + os.path.basename(modelPath_new).replace(".", "-") + now02 + ".csv"
+	# val_log = open(val_logPath, "wt", newline="")
+	# cw = csv.writer(val_log)
+	# cw.writerow([val_log])
+	# output.write("testing model: {}\n".format(modelPath_new))
+	# cw.writerow(["valB Set", "degree", "mean_accuracy"])
+
+	# labelName = get_label_file_name("valB", "")
 	# labelPath = DATASET_ROOT + labelName
+	# for val in val_folders:
+	# 	cw.writerow([" ", "\t\t\t valB_{:s} \t\t\t".format(val), " "])
+	# 	output.write("\t\t\t valB_{:s} \t\t\t\n".format(val))
+	# 	degrees = [f.path for f in os.scandir(DATASET_ROOT + val) if f.is_dir()]
+	# 	if degrees == []:
+	# 		imagePath = DATASET_ROOT + val + "/"
+	# 		outputPath = TEST_OUTPUT_ROOT + "(" + train_folder + ")_(" + val + ")/test_result.txt"
+	# 		MA = test_network(modelPath_new, imagePath, labelPath, outputPath, BN_flag=3)
+	# 		cw.writerow([val, "{:.3f}".format(100*MA)])
+	# 		output.write("valB: {}, \t mean accuracy: {:.3f}\n".format(val, 100*MA))
+	# 	else:
+	# 		for degree in degrees:
+	# 			# imagePath = DATASET_ROOT + val_folder + "/" + degree + "/"
+	# 			imagePath = degree + "/"
+	# 			outputPath = TEST_OUTPUT_ROOT + "(" + train_folder + ")_(" + os.path.basename(degree) + ")/test_result.txt"
+	# 			if os.path.exists(outputPath):
+	# 				continue
+	# 			MA = test_network(modelPath_new, imagePath, labelPath, outputPath, BN_flag=3)
+	# 			cw.writerow([val, os.path.basename(degree), "{:.3f}".format(100*MA)])
+	# 			output.write("valB: {}, \t degree: {}, \t mean accuracy: {:.3f}\n".format(val, os.path.basename(degree), 100*MA))
 
-	# outputPath = TEST_OUTPUT_ROOT + "(" + train_folder + ")_(" + val_folder + ")/test_result.txt"
-	# test_network(modelPath_new, imagePath, labelPath, outputPath)
+	# val_log.close()
+	# output.close()
+
+
+			
 
 def single_test_with_config(subtask_id=-1):
 	train_folder = "trainB"
@@ -786,6 +914,11 @@ if __name__ == "__main__":
 	parser.add_argument('--gpu_id', required=False, metavar="gpu_id", help='gpu id (0/1)')
 	parser.add_argument('--task_id', required=False, metavar="task_id", help='task_id id (0/1)')
 	parser.add_argument('--subtask_id', required=False, metavar="subtask_id", help='subtask_id id (0/1)')
+	parser.add_argument('--output_name', default='diffaug_results',
+                        type=str, help='prefix used to define output path')
+	parser.add_argument('--model', default=None, type=str, help='which model to use in diffaug test')
+	parser.add_argument('--resume', default="", type=str, help='which model to resume')
+	parser.add_argument('--augments', default=None, type=str, help='augments in DiffAug_Net')
 	parser.add_argument('--adv_step', default=0.2, type=float, help='fgsm step size')
 	parser.add_argument('--eps', default=0.5, type=float, help='adversarial step: projection radias')
 	parser.add_argument('--n_repeats', default=3, type=int, help='adversarial repeat')
@@ -794,6 +927,8 @@ if __name__ == "__main__":
 
 	if (args.gpu_id != None):
 		os.environ["CUDA_VISIBLE_DEVICES"]=str(args.gpu_id)
+	else:
+		os.environ["CUDA_VISIBLE_DEVICES"]=""
 	print("CUDA_VISIBLE_DEVICES " + os.environ["CUDA_VISIBLE_DEVICES"])
 
 	if args.task_id:
@@ -813,12 +948,21 @@ if __name__ == "__main__":
 			test_AdvProp(args.subtask_id)
 		elif args.task_id == '7':
 			calculate_FID(args.subtask_id)
+		# elif args.task_id == '8':
+		# 	multi_factor_search_test()
 		elif args.task_id == '8':
-			multi_factor_search_test()
+			train_diffaug(args.output_name, args.resume, 
+					args.augments, args.adv_step, args.n_repeats, args.eps)
+		elif args.task_id == '9':
+			test_diffaug(args.output_name, args.model, args.adv_step, args.n_repeats, args.eps)
 		else:
 			print("Unknown task: " + args.task_id)
 	else:
-		single_test_advbn(args.adv_step, args.n_repeats, args.eps, args.before_relu)
+		train_diffaug(args.output_name, args.resume, 
+					args.augments, args.adv_step, args.n_repeats, args.eps)
+		# test_diffaug(args.output_name, args.augments, args.adv_step, args.n_repeats, args.eps)
+		# single_test_advbn(args.adv_step, args.n_repeats, args.eps, args.before_relu)
+		# single_test()
 		#single_test_with_config()
 		#single_test_AdvProp()
 		#multi_factor_search_test()

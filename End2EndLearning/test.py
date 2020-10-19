@@ -13,18 +13,19 @@ sys.path.insert(0, './library/')
 
 from learning import test_dnn_multi, test_dnn_visualize, visualize_dnn_on_image
 
-def test_network(modelPath, imagePath, labelPath, outputPath, BN_flag=0, pathID=0, classification=False, visualize=False, radius=5, ratio=1):
-	test_network_multi(modelPath, [imagePath], [labelPath], outputPath, BN_flag, pathID, classification, visualize, radius, ratio)
+def test_network(modelPath, imagePath, labelPath, outputPath, BN_flag=0, pathID=0, diffAug=False, classification=False, visualize=False, radius=5, ratio=1):
+	MA = test_network_multi(modelPath, [imagePath], [labelPath], outputPath, BN_flag, pathID, diffAug, classification, visualize, radius, ratio)
+	return MA
 
-def test_network_multi(modelPath, imagePath_list, labelPath_list, outputPath, BN_flag=0, pathID=0, classification=False, visualize=False, radius=5, ratio=1, pack_flag=False):
+def test_network_multi(modelPath, imagePath_list, labelPath_list, outputPath, BN_flag=0, pathID=0, diffAug=False, classification=False, visualize=False, radius=5, ratio=1, pack_flag=False):
 	if modelPath:
 		print('Model used: ' + modelPath)
 	else:
 		print('No model specified. Using random initialization of weights.')
 		
-	print('Image folder: '+str(imagePath_list))
-	print('Label path: '+str(labelPath_list))
-	print('Output path: '+outputPath)
+	# print('Image folder: '+str(imagePath_list))
+	# print('Label path: '+str(labelPath_list))
+	# print('Output path: '+outputPath)
 
 	file_path = os.path.dirname(outputPath)
 	if file_path != '':
@@ -50,7 +51,8 @@ def test_network_multi(modelPath, imagePath_list, labelPath_list, outputPath, BN
 	if visualize:
 		test_dnn_visualize(modelPath, imagePath, labelPath, outputPath, netType, flags, specs, BN_flag, pathID, radius)
 	else:
-		MA = test_dnn_multi(modelPath, imagePath_list, labelPath_list, outputPath, netType, flags, specs, BN_flag, pathID, ratio, pack_flag)
+		MA = test_dnn_multi(modelPath, imagePath_list, labelPath_list, outputPath, netType, flags, specs, BN_flag, pathID, ratio, pack_flag, 
+		diffAug=diffAug)
 
 	return MA
 

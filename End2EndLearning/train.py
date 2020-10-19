@@ -17,14 +17,14 @@ from learning import train_dnn_multi
 
 def train_network(imagePath, labelPath, outputPath, modelPath = "", trainRatio = 1.0, partialPreModel = False, reinitHeader = False, 
 	BN_flag=0, imagePath_advp=[], labelPath_advp=[], trainRatio_advp = 1.0, reinitBN = False, classification = False, netType=1,
-	adv_step=0.2, n_repeats=3, eps=0.5, before_relu=False):
+	augments=None, adv_step=0.2, n_repeats=3, eps=0.5, before_relu=False, resume=0):
 	train_network_multi([imagePath], [labelPath], outputPath, modelPath, trainRatio, partialPreModel, reinitHeader, BN_flag, 
 		[imagePath_advp], [labelPath_advp], trainRatio_advp, reinitBN, classification, netType, 
-		adv_step=adv_step, n_repeats=n_repeats, eps=eps, before_relu=before_relu)
+		augments=augments, adv_step=adv_step, n_repeats=n_repeats, eps=eps, before_relu=before_relu, resume=resume)
 
 def train_network_multi(imagePath_list, labelPath_list, outputPath, modelPath = "", trainRatio = 1.0, partialPreModel = False, reinitHeader = False, 
 	BN_flag=0, imagePath_list_advp=[], labelPath_list_advp=[], trainRatio_advp = 1.0, reinitBN = False, classification = False, netType=1, pack_flag=False,
-	adv_step=0.2, n_repeats=3, eps=0.5, before_relu=False):
+	augments=None, adv_step=0.2, n_repeats=3, eps=0.5, before_relu=False, resume=0):
 	print('Image folder: ' + str(imagePath_list))
 	print('Label file: ' + str(labelPath_list))
 	print('Output folder: ' + outputPath)
@@ -52,7 +52,29 @@ def train_network_multi(imagePath_list, labelPath_list, outputPath, modelPath = 
 	#netType = netType        # 1: CNN, 2: LSTM-m2o, 3: LSTM-m2m, 4: LSTM-o2o, 5: GAN
 	train_dnn_multi(imagePath_list, labelPath_list, outputPath, netType, flags, specs, modelPath, trainRatio, partialPreModel, reinitHeader, 
 		BN_flag, imagePath_list_advp, labelPath_list_advp, trainRatio_advp, reinitBN, pack_flag, 
-		adv_step=adv_step, n_repeats=n_repeats, eps=eps, before_relu=before_relu)
+		augments=augments, adv_step=adv_step, n_repeats=n_repeats, eps=eps, before_relu=before_relu, resume=resume)
+
+# def train_network_diffAug(model, nEpoch, augments, trainGenerator, validGenerator):
+# 	net(tf.ones((1, 66, 200, 3)))
+# 	net.compile(h_optimizer=tf.keras.optimizers.Adam(1e-4), loss_fn=tf.keras.losses.MeanSquaredError(), h_metrics=mean_accuracy_tf)
+# 	val_ma_tracker = tf.keras.metrics.Mean(name="val_ma")
+# 	for epoch in range(epochs):
+#     	print("\n Train Epoch: [{}/{}]".format(epoch,nEpoch))
+#     	start_time = time.time()
+
+# 		# iterate over different augmentations
+# 		for aug in augments:
+#     		# Iterate over the batches of the dataset.
+#     		for step, (x_batch_train, y_batch_train) in enumerate(trainGenerator):
+#     		    mloss, ma = model.train_step((x_batch_train, y_batch_train), aug)
+# 			print("augmentation: {} \t loss_tracker: {%.4f} \t ma_tracker: {%.4f}\n".format(aug, float(mloss), float(ma)))
+		
+# 		# validation
+# 		for x_batch_val, y_batch_val in validGenerator:
+# 			val_ma = model.test_step((x_batch_val, y_batch_val))
+# 			val_ma_tracker.update_state(val_ma)
+# 		print("\n Val Epoch: [{}/{}] \t ma: {%.4f}\n".format(epoch, nEpoch, float(val_ma_tracker.result())))
+# 		print("Time taken: {%.2f}".format(time.time() - start_time))
 
 
 def train_network_multi_factor_search(imagePath, labelPath, outputPath, modelPath = "", trainRatio = 1.0, partialPreModel = False, reinitHeader = False, 
