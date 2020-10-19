@@ -415,10 +415,11 @@ def train_dnn_multi(imageDir_list, labelPath_list, outputPath, netType, flags, s
 			loss_log = open(outputPath + 'loss-log', "w")
 
 			# net.compile(h_optimizer=tf.keras.optimizers.Adam(1e-4), loss_fn=tf.keras.losses.MeanSquaredError(), h_metrics=mean_accuracy_tf)
-			optimizer = tf.keras.optimizers.Adam(1e-4)
+			optimizer = tf.keras.optimizers.Adam(1e-3)
 			loss_fn = tf.keras.losses.MeanSquaredError()
 
 			val_ma_tracker = tf.keras.metrics.Mean(name="val_ma")
+			val_loss_tracker = tf.keras.metrics.Mean(name="val_loss")
 			for epoch in range(resume, nEpoch):
 			# for epoch in range(1):
 				print("\n Train Epoch: [{}/{}]".format(epoch, nEpoch))
@@ -430,6 +431,8 @@ def train_dnn_multi(imageDir_list, labelPath_list, outputPath, netType, flags, s
 					# Iterate over the batches of the dataset.
 					for step, (x_batch_train, y_batch_train) in enumerate(batchTrainDataset):
 						# mloss = net.my_train_step((x_batch_train, y_batch_train), aug)
+						# print(x_batch_train[:10])
+						# print(y_batch_train[:10])
 						input = tf.cast(x_batch_train, dtype=tf.float32)
 						target = tf.cast(y_batch_train, dtype=tf.float32)
 
@@ -474,7 +477,8 @@ def train_dnn_multi(imageDir_list, labelPath_list, outputPath, netType, flags, s
 
 								x = aug_op(input, param)
 								output = net(x)
-								loss = loss_fn(output, target)
+								# loss = loss_fn(output, target)
+								loss = net.mse(output, target)
 
 							grad = tape.gradient(loss, [net.delta])[0]
 							net.delta.assign_add(net.adv_step * tf.keras.backend.sign(grad))
@@ -486,7 +490,8 @@ def train_dnn_multi(imageDir_list, labelPath_list, outputPath, netType, flags, s
 							x = input
 						with tf.GradientTape() as tape:
 							output = net(x)
-							loss = loss_fn(output, target)
+							# loss = loss_fn(output, target)
+							loss = net.mse(output, target)
 
 						grads = tape.gradient(loss, net.model.trainable_weights)
 						optimizer.apply_gradients(zip(grads, net.model.trainable_weights))
@@ -506,7 +511,9 @@ def train_dnn_multi(imageDir_list, labelPath_list, outputPath, netType, flags, s
 					target = tf.cast(y_batch_val, dtype=tf.float32)
 
 					output = net(input)
-					val_loss = loss_fn(target, output)
+					# val_loss = loss_fn(target, output)
+					val_loss = net.mse(target, output)
+					val_loss_tracker.update_state(val_loss)
 					thresh_holds = [0.1, 0.2, 0.5, 1, 2, 5]
 					total_acc = 0
 					prediction_error = tf.math.abs(output-target)
@@ -520,8 +527,8 @@ def train_dnn_multi(imageDir_list, labelPath_list, outputPath, netType, flags, s
 					val_ma = total_acc / len(thresh_holds)
 					val_ma_tracker.update_state(val_ma)
 
-				print("\n Val Epoch: [{}/{}] \t loss: {:.4f} \t ma: {:.4f} \n".format(epoch, nEpoch, float(val_loss), float(val_ma_tracker.result())))
-				loss_log.write("\n Val Epoch: [{}/{}] \t loss: {:.4f} \t ma: {:.4f}\n".format(epoch, nEpoch, float(val_loss), float(val_ma_tracker.result())))
+				print("\n Val Epoch: [{}/{}] \t loss: {:.4f} \t ma: {:.4f} \n".format(epoch, nEpoch, float(val_loss_tracker.result()), float(val_ma_tracker.result())))
+				loss_log.write("\n Val Epoch: [{}/{}] \t loss: {:.4f} \t ma: {:.4f}\n".format(epoch, nEpoch, float(val_loss_tracker.result()), float(val_ma_tracker.result())))
 				print("Time taken: {:.2f}s".format(time.time() - start_time))
 				loss_log.write("Time taken: {:.2f}s".format(time.time() - start_time))
 				if (epoch + 1) % 100 == 0:
