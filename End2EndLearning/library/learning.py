@@ -435,7 +435,7 @@ def train_dnn_multi(imageDir_list, labelPath_list, outputPath, netType, flags, s
 						# print(y_batch_train[:10])
 						input = tf.cast(x_batch_train, dtype=tf.float32)
 						target = tf.cast(y_batch_train, dtype=tf.float32)
-
+						
 						if net.delta is None:
 							net.delta = tf.Variable(tf.zeros([1]))
 						else:
@@ -490,8 +490,8 @@ def train_dnn_multi(imageDir_list, labelPath_list, outputPath, netType, flags, s
 							x = input
 						with tf.GradientTape() as tape:
 							output = net(x)
-							# loss = loss_fn(output, target)
-							loss = net.mse(output, target)
+							loss = loss_fn(output, target)
+							# loss = net.mse(output, target)
 
 						grads = tape.gradient(loss, net.model.trainable_weights)
 						optimizer.apply_gradients(zip(grads, net.model.trainable_weights))
@@ -499,6 +499,7 @@ def train_dnn_multi(imageDir_list, labelPath_list, outputPath, netType, flags, s
 						net.train_loss_tracker.update_state(loss)
 
 					mloss = net.train_loss_tracker.result()
+					net.train_loss_tracker.reset_states()
 					print("augmentation: {} \t loss_tracker: {:.4f} ".format(aug, float(mloss)))
 					loss_log.write("augmentation: {} \t loss_tracker: {:.4f} ".format(aug, float(mloss)))
 					# net.augments = aug
@@ -511,8 +512,8 @@ def train_dnn_multi(imageDir_list, labelPath_list, outputPath, netType, flags, s
 					target = tf.cast(y_batch_val, dtype=tf.float32)
 
 					output = net(input)
-					# val_loss = loss_fn(target, output)
-					val_loss = net.mse(target, output)
+					val_loss = loss_fn(target, output)
+					# val_loss = net.mse(target, output)
 					val_loss_tracker.update_state(val_loss)
 					thresh_holds = [0.1, 0.2, 0.5, 1, 2, 5]
 					total_acc = 0
@@ -531,6 +532,9 @@ def train_dnn_multi(imageDir_list, labelPath_list, outputPath, netType, flags, s
 				loss_log.write("\n Val Epoch: [{}/{}] \t loss: {:.4f} \t ma: {:.4f}\n".format(epoch, nEpoch, float(val_loss_tracker.result()), float(val_ma_tracker.result())))
 				print("Time taken: {:.2f}s".format(time.time() - start_time))
 				loss_log.write("Time taken: {:.2f}s".format(time.time() - start_time))
+				val_ma_tracker.reset_states()
+				val_loss_tracker.reset_states()
+
 				if (epoch + 1) % 100 == 0:
 					net.save_weights(filepath= outputPath + 'checkpoint/cp-weights-{:02d}.ckpt'.format(epoch))
 
